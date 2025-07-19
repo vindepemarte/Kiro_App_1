@@ -19,17 +19,21 @@ import { User, AuthState } from './types';
 export class AuthService {
   private _auth: Auth | null = null;
   private currentUser: User | null = null;
-  private authStateListeners: ((user: User | null) => void)[] = [];
 
   private get auth(): Auth {
     if (!this._auth) {
-      this._auth = getFirebaseAuth();
+      try {
+        this._auth = getFirebaseAuth();
+      } catch (error) {
+        console.error('Failed to get Firebase Auth:', error);
+        throw error;
+      }
     }
     return this._auth;
   }
 
   constructor() {
-    // Don't initialize Firebase in constructor to prevent build-time errors
+    // Initialize lazily when needed
   }
 
   // Get initial auth token from config
@@ -67,7 +71,6 @@ export class AuthService {
     try {
       await signOut(this.auth);
       this.currentUser = null;
-      this.notifyAuthStateListeners(null);
     } catch (error) {
       console.error('Sign out failed:', error);
       throw new Error(this.getAuthErrorMessage(error));
@@ -76,26 +79,29 @@ export class AuthService {
 
   // Listen to authentication state changes
   onAuthStateChanged(callback: (user: User | null) => void): () => void {
-    // Add callback to listeners
-    this.authStateListeners.push(callback);
-
     // Set up Firebase auth state listener
     const unsubscribe = onAuthStateChanged(this.auth, (firebaseUser) => {
       const user = firebaseUser ? this.mapFirebaseUser(firebaseUser) : null;
       this.currentUser = user;
-      this.notifyAuthStateListeners(user);
+      callback(user);
     });
 
-    // Return cleanup function
-    return () => {
-      // Remove callback from listeners
-      const index = this.authStateListeners.indexOf(callback);
-      if (index > -1) {
-        this.authStateListeners.splice(index, 1);
-      }
-      // Unsubscribe from Firebase listener
-      unsubscribe();
-    };
+    return unsubscribe;
+  }
+
+  // Sign in anonymously
+  async signInAnonymously(): Promise<User> {
+    try {
+      console.log('Attempting anonymous sign-in...');
+      const result = await signInAnonymously(this.auth);
+      console.log('Anonymous sign-in successful:', result.user.uid);
+      const user = this.mapFirebaseUser(result.user);
+      this.currentUser = user;
+      return user;
+    } catch (error) {
+      console.error('Anonymous sign-in error:', error);
+      throw error;
+    }
   }
 
   // Re-authenticate with custom token
@@ -166,15 +172,7 @@ export class AuthService {
     };
   }
 
-  private notifyAuthStateListeners(user: User | null): void {
-    this.authStateListeners.forEach(callback => {
-      try {
-        callback(user);
-      } catch (error) {
-        console.error('Auth state listener error:', error);
-      }
-    });
-  }
+
 
   private getAuthErrorMessage(error: any): string {
     if (typeof error === 'object' && error !== null) {

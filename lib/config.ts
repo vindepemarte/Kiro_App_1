@@ -110,5 +110,8 @@ export function validateConfig(config: AppConfig): { isValid: boolean; errors: s
 
 // Get initial auth token from global variable
 export function getInitialAuthToken(): string | undefined {
-  return typeof window !== 'undefined' ? window.__initial_auth_token : global.__initial_auth_token;
+  if (typeof window !== 'undefined') {
+    return window.__initial_auth_token || (window as any).__ENV?.INITIAL_AUTH_TOKEN;
+  }
+  return undefined;
 }

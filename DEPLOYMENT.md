@@ -1,5 +1,12 @@
 # Production Deployment Guide
 
+## ✅ Build Issues Fixed
+
+The Firebase initialization errors during build time have been resolved:
+- Firebase services now use lazy loading to prevent build-time initialization
+- Configuration validation is skipped during build phase
+- All services are build-safe and will only initialize when actually needed
+
 ## Environment Variables Required
 
 Make sure to set these environment variables in your production deployment platform (Coolify, Vercel, etc.):
@@ -34,7 +41,7 @@ NODE_ENV=production
 ## Docker Build Command (if needed)
 ```bash
 docker build -t meeting-ai .
-docker run -p 3000:3000 meeting-ai
+docker run -p 3001:3001 meeting-ai
 ```
 
 ## Coolify Specific Notes
@@ -42,7 +49,7 @@ docker run -p 3000:3000 meeting-ai
 - The `.npmrc` file will handle the peer dependency issues automatically
 - The `Dockerfile` is optimized for production deployment
 - Make sure all environment variables are set in Coolify's environment section
-- The app will run on port 3000 by default
+- The app will run on port 3001 by default
 
 ## Troubleshooting
 

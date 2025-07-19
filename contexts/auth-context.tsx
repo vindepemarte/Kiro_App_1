@@ -29,11 +29,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
   // Initialize authentication on mount
   useEffect(() => {
     let mounted = true;
-    let initialLoadingTimeout: NodeJS.Timeout;
 
     const initAuth = async () => {
       try {
-        // Set up auth state listener first
+        // Set up auth state listener
         const unsubscribe = authService.onAuthStateChanged((user) => {
           if (mounted) {
             setAuthState(prev => ({
@@ -45,55 +44,33 @@ export function AuthProvider({ children }: AuthProviderProps) {
           }
         });
 
-        // Set a timeout to ensure loading doesn't get stuck
-        initialLoadingTimeout = setTimeout(() => {
-          if (mounted) {
-            setAuthState(prev => ({
-              ...prev,
-              loading: false,
-              error: null,
-            }));
-          }
-        }, 3000); // 3 second timeout
-
-        // Only initialize with custom token if available
+        // Try to authenticate
         const initialToken = authService.getInitialAuthToken();
         if (initialToken) {
-          try {
-            await authService.reauthenticateWithCustomToken(initialToken);
-          } catch (error) {
-            console.warn('Custom token authentication failed:', error);
-            // Continue without authentication
-          }
+          await authService.reauthenticateWithCustomToken(initialToken);
+        } else {
+          await authService.signInAnonymously();
         }
 
-        // Cleanup function
-        return () => {
-          if (initialLoadingTimeout) {
-            clearTimeout(initialLoadingTimeout);
-          }
-          unsubscribe();
-        };
+        return unsubscribe;
       } catch (error) {
+        console.error('Auth initialization error:', error);
         if (mounted) {
-          console.error('Auth initialization error:', error);
           setAuthState(prev => ({
             ...prev,
             loading: false,
             error: error instanceof Error ? error.message : 'Authentication failed',
           }));
         }
+        return () => {};
       }
     };
 
-    const cleanup = initAuth();
+    const unsubscribePromise = initAuth();
 
     return () => {
       mounted = false;
-      if (initialLoadingTimeout) {
-        clearTimeout(initialLoadingTimeout);
-      }
-      cleanup.then(cleanupFn => cleanupFn?.());
+      unsubscribePromise.then(unsubscribe => unsubscribe());
     };
   }, []);
 
