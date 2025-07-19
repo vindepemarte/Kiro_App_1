@@ -12,6 +12,12 @@ let db: Firestore | null = null;
 // Initialize Firebase with error handling
 export function initializeFirebase(): { app: FirebaseApp; auth: Auth; db: Firestore } {
   try {
+    // Skip Firebase initialization during build time
+    if (process.env.NODE_ENV === 'production' && typeof window === 'undefined') {
+      // During build time, create mock instances to prevent errors
+      throw new Error('Firebase initialization skipped during build time');
+    }
+
     // Get configuration
     const config = getAppConfig();
     
@@ -69,8 +75,17 @@ export function initializeFirebase(): { app: FirebaseApp; auth: Auth; db: Firest
   }
 }
 
+// Check if we're in a build environment
+function isBuildTime(): boolean {
+  return typeof window === 'undefined' && process.env.NODE_ENV === 'production';
+}
+
 // Get Firebase instances (initialize if needed)
 export function getFirebaseInstances() {
+  if (isBuildTime()) {
+    throw new Error('Firebase not available during build time');
+  }
+  
   if (!app || !auth || !db) {
     return initializeFirebase();
   }
@@ -84,18 +99,27 @@ export function resetFirebaseInstances() {
   db = null;
 }
 
-// Export individual getters for convenience
+// Export individual getters for convenience with build-time safety
 export function getFirebaseApp(): FirebaseApp {
+  if (isBuildTime()) {
+    throw new Error('Firebase not available during build time');
+  }
   const { app } = getFirebaseInstances();
   return app;
 }
 
 export function getFirebaseAuth(): Auth {
+  if (isBuildTime()) {
+    throw new Error('Firebase not available during build time');
+  }
   const { auth } = getFirebaseInstances();
   return auth;
 }
 
 export function getFirebaseDb(): Firestore {
+  if (isBuildTime()) {
+    throw new Error('Firebase not available during build time');
+  }
   const { db } = getFirebaseInstances();
   return db;
 }

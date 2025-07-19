@@ -17,12 +17,19 @@ import { getInitialAuthToken } from './config';
 import { User, AuthState } from './types';
 
 export class AuthService {
-  private auth: Auth;
+  private _auth: Auth | null = null;
   private currentUser: User | null = null;
   private authStateListeners: ((user: User | null) => void)[] = [];
 
+  private get auth(): Auth {
+    if (!this._auth) {
+      this._auth = getFirebaseAuth();
+    }
+    return this._auth;
+  }
+
   constructor() {
-    this.auth = getFirebaseAuth();
+    // Don't initialize Firebase in constructor to prevent build-time errors
   }
 
   // Get initial auth token from config

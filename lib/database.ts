@@ -37,8 +37,22 @@ export interface DatabaseService {
 }
 
 class FirestoreService implements DatabaseService {
-  private db = getFirebaseDb();
-  private appId = getAppConfig().appId;
+  private _db: Firestore | null = null;
+  private _appId: string | null = null;
+
+  private get db(): Firestore {
+    if (!this._db) {
+      this._db = getFirebaseDb();
+    }
+    return this._db;
+  }
+
+  private get appId(): string {
+    if (!this._appId) {
+      this._appId = getAppConfig().appId;
+    }
+    return this._appId;
+  }
 
   // Get the collection path for user meetings
   private getUserMeetingsPath(userId: string): string {

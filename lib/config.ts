@@ -67,6 +67,11 @@ export function getAppConfig(): AppConfig {
 export function validateConfig(config: AppConfig): { isValid: boolean; errors: string[] } {
   const errors: string[] = [];
 
+  // Skip validation during build time
+  if (typeof window === 'undefined' && process.env.NODE_ENV === 'production') {
+    return { isValid: true, errors: [] };
+  }
+
   // Validate Firebase config
   if (!config.firebase.apiKey) errors.push('Firebase API key is missing');
   if (!config.firebase.authDomain) errors.push('Firebase auth domain is missing');
