@@ -40,21 +40,36 @@ export function getAppConfig(): AppConfig {
   const globalFirebaseConfig = (typeof window !== 'undefined' ? window.__firebase_config : global.__firebase_config) || undefined;
   const globalAppId = (typeof window !== 'undefined' ? window.__app_id : global.__app_id) || undefined;
 
+  // Helper function to get environment variables with fallbacks
+  const getEnvVar = (key: string, fallback: string = ''): string => {
+    // Try process.env first (server-side and build-time)
+    if (typeof process !== 'undefined' && process.env[key]) {
+      return process.env[key];
+    }
+    
+    // Try window.__ENV for client-side runtime injection
+    if (typeof window !== 'undefined' && (window as any).__ENV && (window as any).__ENV[key]) {
+      return (window as any).__ENV[key];
+    }
+    
+    return fallback;
+  };
+
   const firebaseConfig: FirebaseConfig = globalFirebaseConfig || {
-    apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || '',
-    authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || '',
-    projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || '',
-    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || '',
-    messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || '',
-    appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || '',
+    apiKey: getEnvVar('NEXT_PUBLIC_FIREBASE_API_KEY'),
+    authDomain: getEnvVar('NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN'),
+    projectId: getEnvVar('NEXT_PUBLIC_FIREBASE_PROJECT_ID'),
+    storageBucket: getEnvVar('NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET'),
+    messagingSenderId: getEnvVar('NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID'),
+    appId: getEnvVar('NEXT_PUBLIC_FIREBASE_APP_ID'),
   };
 
   const geminiConfig: GeminiConfig = {
-    apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY || '',
-    model: process.env.NEXT_PUBLIC_GEMINI_MODEL || 'gemini-2.0-flash',
+    apiKey: getEnvVar('NEXT_PUBLIC_GEMINI_API_KEY') || getEnvVar('GEMINI_API_KEY'),
+    model: getEnvVar('NEXT_PUBLIC_GEMINI_MODEL', 'gemini-2.0-flash'),
   };
 
-  const appId = globalAppId || process.env.NEXT_PUBLIC_APP_ID || 'meeting-ai-mvp';
+  const appId = globalAppId || getEnvVar('NEXT_PUBLIC_APP_ID', 'meeting-ai-mvp');
 
   return {
     firebase: firebaseConfig,
