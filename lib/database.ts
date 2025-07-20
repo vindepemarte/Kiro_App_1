@@ -1213,15 +1213,9 @@ class FirestoreService implements DatabaseService {
         return null;
       }
 
-      // Return a basic user structure for invitation purposes
-      return {
-        uid: `temp-${Date.now()}`, // Temporary ID for invitation
-        email,
-        displayName: email.split('@')[0], // Use email prefix as display name
-        photoURL: null,
-        isAnonymous: false,
-        customClaims: null,
-      };
+      // User not found - return null to force proper error handling
+      // No more temporary IDs - users must exist before they can be invited
+      return null;
     } catch (error) {
       console.error('User search error:', error);
       return null;

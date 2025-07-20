@@ -364,7 +364,7 @@ export class TeamManagementService implements TeamService {
         await this.databaseService.updateTeamMember(teamId, invitedMember.userId, memberUpdates);
 
         // If the invited member had a temporary ID, we need to remove the old record and add a new one
-        if (invitedMember.userId !== userId && invitedMember.userId.startsWith('invited-')) {
+        if (invitedMember.userId !== userId && (invitedMember.userId.startsWith('invited-') || invitedMember.userId.startsWith('temp-'))) {
           // Remove the temporary member record
           await this.databaseService.removeTeamMember(teamId, invitedMember.userId);
           
