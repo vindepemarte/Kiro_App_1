@@ -5,11 +5,11 @@ import { getTeamService } from './team-service';
 import { databaseService } from './database';
 import { notificationService } from './notification-service';
 import { FileProcessor } from './file-processor';
-import { 
-  Meeting, 
-  TeamMember, 
-  ActionItem, 
-  ProcessedMeeting, 
+import {
+  Meeting,
+  TeamMember,
+  ActionItem,
+  ProcessedMeeting,
   MeetingMetadata,
   AIResponse,
   CreateNotificationData
@@ -45,7 +45,7 @@ export class TeamAwareMeetingProcessor {
     options: TeamAwareProcessingOptions
   ): Promise<ProcessingResult> {
     const startTime = Date.now();
-    
+
     try {
       // Step 1: Get team members if this is a team meeting
       let teamMembers: TeamMember[] = [];
@@ -60,7 +60,7 @@ export class TeamAwareMeetingProcessor {
 
       // Step 3: Extract speaker names from transcript for matching
       const speakerNames = this.extractSpeakerNames(transcript);
-      
+
       // Step 4: Match speakers to team members
       const speakerMatches = this.matchSpeakersToTeamMembers(speakerNames, teamMembers);
 
@@ -98,7 +98,7 @@ export class TeamAwareMeetingProcessor {
         }
       };
 
-      const meetingId = await databaseService.saveMeeting(options.userId, processedMeeting);
+      const meetingId = await databaseService.saveMeeting(options.userId, processedMeeting, options.teamId);
       meeting.id = meetingId;
 
       // Step 8: Send notifications for assigned tasks
@@ -129,7 +129,7 @@ export class TeamAwareMeetingProcessor {
    */
   private extractSpeakerNames(transcript: string): string[] {
     const speakerNames = new Set<string>();
-    
+
     // Common patterns for speaker identification
     const patterns = [
       // "John Doe:" or "John Doe :"
@@ -145,11 +145,11 @@ export class TeamAwareMeetingProcessor {
       while ((match = pattern.exec(transcript)) !== null) {
         const name = match[1].trim();
         // Filter out common false positives
-        if (name.length > 2 && 
-            !name.toLowerCase().includes('meeting') &&
-            !name.toLowerCase().includes('agenda') &&
-            !name.toLowerCase().includes('action') &&
-            !/^\d+$/.test(name)) {
+        if (name.length > 2 &&
+          !name.toLowerCase().includes('meeting') &&
+          !name.toLowerCase().includes('agenda') &&
+          !name.toLowerCase().includes('action') &&
+          !/^\d+$/.test(name)) {
           speakerNames.add(name);
         }
       }
@@ -162,7 +162,7 @@ export class TeamAwareMeetingProcessor {
    * Match speakers to team members using the team service
    */
   private matchSpeakersToTeamMembers(
-    speakerNames: string[], 
+    speakerNames: string[],
     teamMembers: TeamMember[]
   ): Map<string, TeamMember | null> {
     return this.teamService.matchMultipleSpeakers(speakerNames, teamMembers);
@@ -180,7 +180,7 @@ export class TeamAwareMeetingProcessor {
     processingTime: number
   ): Promise<Meeting> {
     const title = FileProcessor.extractTitle(transcript, options.fileName || 'Meeting Transcript');
-    
+
     // Enhance action items with team context
     const actionItems: ActionItem[] = aiResponse.actionItems.map((item, index) => ({
       id: `action-${Date.now()}-${index}`,
@@ -274,7 +274,7 @@ export class TeamAwareMeetingProcessor {
    */
   private extractNamesFromText(text: string): string[] {
     const names: string[] = [];
-    
+
     // Look for capitalized words that could be names
     const words = text.split(/\s+/);
     for (let i = 0; i < words.length; i++) {
@@ -292,7 +292,7 @@ export class TeamAwareMeetingProcessor {
         names.push(word);
       }
     }
-    
+
     return names;
   }
 
@@ -381,21 +381,21 @@ export class TeamAwareMeetingProcessor {
   ): Array<{ task: ActionItem; suggestions: TeamMember[] }> {
     return unassignedTasks.map(task => {
       const suggestions: TeamMember[] = [];
-      
+
       // Add team members who were mentioned as speakers
       for (const [speakerName, member] of speakerMatches) {
         if (member && !suggestions.find(s => s.userId === member.userId)) {
           suggestions.push(member);
         }
       }
-      
+
       // Add other active team members
       for (const member of teamMembers) {
         if (!suggestions.find(s => s.userId === member.userId)) {
           suggestions.push(member);
         }
       }
-      
+
       return { task, suggestions };
     });
   }

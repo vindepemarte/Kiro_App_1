@@ -34,6 +34,8 @@ import { getTouchOptimizedClasses, getResponsiveGridClasses, GRID_CONFIGS } from
 import { getTeamService } from "@/lib/team-service"
 import { TaskAssignment } from "@/components/task-assignment"
 import { getTeamAwareProcessor } from "@/lib/team-aware-processor"
+import { useEnhancedToast, ToastContainer } from "@/components/ui/enhanced-feedback"
+import { MobileContainer, CollapsibleSection, MobileTabs, PullToRefresh } from "@/components/ui/mobile-optimizations"
 
 export default function Dashboard() {
   const { user, loading, error, signOut } = useAuth()
@@ -51,6 +53,9 @@ export default function Dashboard() {
   const [activeTab, setActiveTab] = useState<'personal' | 'team'>('personal')
   const [selectedUploadTeam, setSelectedUploadTeam] = useState<string>('personal')
   const [isClient, setIsClient] = useState(false)
+  
+  // Enhanced toast system
+  const toast = useEnhancedToast()
 
   // Ensure client-side only rendering to prevent hydration issues
   useEffect(() => {
@@ -189,7 +194,7 @@ export default function Dashboard() {
       setUploadProgress(100)
       setIsProcessing(false)
       
-      // Show success notification with assignment summary
+      // Show enhanced success notification with assignment summary
       const { meeting, assignmentSummary } = processingResult
       let successMessage = `Meeting "${meeting.title}" has been processed successfully!`
       
@@ -198,9 +203,19 @@ export default function Dashboard() {
         if (assignmentSummary.unassigned > 0) {
           successMessage += ` ${assignmentSummary.unassigned} tasks need manual assignment.`
         }
+        // Use celebration variant for team meetings with assignments
+        toast.celebrate(successMessage, {
+          title: 'Meeting Processed Successfully! 🎉',
+          actionLabel: 'View Report',
+          onAction: () => handleViewReport(meeting.id)
+        })
+      } else {
+        toast.success(successMessage, {
+          title: 'Processing Complete',
+          actionLabel: 'View Report',
+          onAction: () => handleViewReport(meeting.id)
+        })
       }
-      
-      showSuccess(successMessage, 'Processing Complete')
       
     } catch (error) {
       setIsProcessing(false)
@@ -256,8 +271,10 @@ export default function Dashboard() {
         { maxRetries: 2, baseDelay: 1000 }
       )
       
-      // Show success notification
-      showSuccess('Meeting deleted successfully', 'Delete Complete')
+      // Show enhanced success notification
+      toast.success('Meeting deleted successfully', {
+        title: 'Delete Complete'
+      })
       
       // Meeting will be automatically removed from UI via real-time listener
     } catch (error) {
@@ -284,6 +301,28 @@ export default function Dashboard() {
     }
 
     return filteredMeetings
+  }
+
+  // Get team meeting analytics
+  const getTeamMeetingAnalytics = () => {
+    const teamMeetings = meetings.filter(meeting => meeting.teamId)
+    const analytics = {
+      totalTeamMeetings: teamMeetings.length,
+      meetingsByTeam: new Map<string, number>(),
+      tasksByTeam: new Map<string, number>(),
+      recentTeamActivity: teamMeetings.slice(0, 5)
+    }
+
+    // Calculate meetings and tasks by team
+    teamMeetings.forEach(meeting => {
+      if (meeting.teamId) {
+        const teamName = getTeamName(meeting.teamId)
+        analytics.meetingsByTeam.set(teamName, (analytics.meetingsByTeam.get(teamName) || 0) + 1)
+        analytics.tasksByTeam.set(teamName, (analytics.tasksByTeam.get(teamName) || 0) + meeting.actionItems.length)
+      }
+    })
+
+    return analytics
   }
 
   // Get team name by ID
@@ -314,10 +353,37 @@ export default function Dashboard() {
       const teamService = getTeamService(databaseService)
       await databaseService.assignTask(meetingId, taskId, assigneeId, user.uid)
       
-      showSuccess('Task assigned successfully', 'Assignment Complete')
+      toast.success('Task assigned successfully', {
+        title: 'Assignment Complete'
+      })
     } catch (error) {
       const handledError = handleDatabaseError(error)
       setMeetingsError(handledError.userMessage)
+    }
+  }
+
+  // Handle refresh for pull-to-refresh
+  const handleRefresh = async () => {
+    if (!user) return
+    
+    try {
+      // Refresh meetings and teams data
+      setMeetingsLoading(true)
+      setTeamsLoading(true)
+      
+      // Add a small delay for better UX
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      
+      toast.success('Data refreshed successfully', {
+        title: 'Refresh Complete',
+        duration: 3000
+      })
+    } catch (error) {
+      toast.error('Failed to refresh data', {
+        title: 'Refresh Failed',
+        actionLabel: 'Try Again',
+        onAction: handleRefresh
+      })
     }
   }
 
@@ -357,6 +423,9 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* Enhanced Toast Container */}
+      <ToastContainer toasts={toast.toasts} position="top-right" />
+      
       {/* Responsive Navigation */}
       <ResponsiveNavigation 
         currentPage="dashboard" 
@@ -364,7 +433,8 @@ export default function Dashboard() {
       />
 
       <ResponsiveContainer maxWidth="full" padding={{ mobile: 4, tablet: 6, desktop: 8 }}>
-        <div className={`py-6 md:py-8 ${isMobile ? 'pb-24' : ''}`}>
+        <PullToRefresh onRefresh={handleRefresh}>
+          <div className={`py-6 md:py-8 ${isMobile ? 'pb-24' : ''}`}>
           <div className="mb-6 md:mb-8">
             <h1 className={`font-bold text-gray-900 mb-2 ${isMobile ? 'text-2xl' : 'text-3xl'}`}>
               Dashboard
@@ -461,12 +531,27 @@ export default function Dashboard() {
                     )}
                   </div>
                 ) : (
-                  <div className="text-center py-8">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-                    <h3 className="text-lg font-medium text-gray-900 mb-2">Processing Meeting...</h3>
-                    <p className="text-gray-600 mb-4">AI is analyzing your transcript and generating insights</p>
-                    <Progress value={uploadProgress} className="max-w-xs mx-auto" />
-                    <p className="text-sm text-gray-500 mt-2">{uploadProgress}% complete</p>
+                  <div className="text-center py-8 animate-fade-in">
+                    <div className="relative mb-6">
+                      <div className="animate-spin rounded-full h-16 w-16 border-4 border-blue-200 border-t-blue-600 mx-auto"></div>
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <div className="w-8 h-8 bg-blue-600 rounded-full animate-pulse"></div>
+                      </div>
+                    </div>
+                    <h3 className="text-lg font-medium text-gray-900 mb-2 animate-pulse">Processing Meeting...</h3>
+                    <p className="text-gray-600 mb-6">AI is analyzing your transcript and generating insights</p>
+                    <div className="max-w-xs mx-auto space-y-3">
+                      <Progress value={uploadProgress} className="h-3 transition-all duration-500" />
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-500">{uploadProgress}% complete</span>
+                        <span className="text-blue-600 font-medium">
+                          {uploadProgress < 30 ? 'Reading file...' :
+                           uploadProgress < 60 ? 'Processing content...' :
+                           uploadProgress < 90 ? 'Generating insights...' :
+                           'Finalizing...'}
+                        </span>
+                      </div>
+                    </div>
                   </div>
                 )}
               </CardContent>
@@ -591,34 +676,123 @@ export default function Dashboard() {
                     ) : getFilteredMeetings().length === 0 ? (
                       <div className="text-center py-8">
                         <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                        <p className="text-gray-600">No team meetings yet</p>
-                        <p className="text-sm text-gray-500">Team meetings will appear here when processed</p>
+                        <p className="text-gray-600">
+                          {selectedTeamFilter === 'all' 
+                            ? 'No team meetings yet' 
+                            : `No meetings for ${getTeamName(selectedTeamFilter)}`
+                          }
+                        </p>
+                        <p className="text-sm text-gray-500">
+                          {selectedTeamFilter === 'all'
+                            ? 'Upload a meeting and assign it to a team to get started'
+                            : 'Upload a meeting and assign it to this team'
+                          }
+                        </p>
                       </div>
                     ) : (
-                      <div className="space-y-4">
-                        {getFilteredMeetings().map((meeting) => (
-                          <div key={meeting.id} className="space-y-2">
-                            <div className="flex items-center justify-between">
-                              <Badge variant="secondary" className="text-xs">
-                                <Users className="h-3 w-3 mr-1" />
-                                {getTeamName(meeting.teamId!)}
-                              </Badge>
-                              {meeting.teamId && isTeamAdmin(meeting.teamId) && (
+                      <div className="space-y-6">
+                        {/* Group meetings by team if showing all teams */}
+                        {selectedTeamFilter === 'all' ? (
+                          (() => {
+                            const meetingsByTeam = new Map<string, Meeting[]>()
+                            getFilteredMeetings().forEach(meeting => {
+                              if (meeting.teamId) {
+                                const teamName = getTeamName(meeting.teamId)
+                                if (!meetingsByTeam.has(teamName)) {
+                                  meetingsByTeam.set(teamName, [])
+                                }
+                                meetingsByTeam.get(teamName)!.push(meeting)
+                              }
+                            })
+
+                            return Array.from(meetingsByTeam.entries()).map(([teamName, teamMeetings]) => (
+                              <div key={teamName} className="space-y-3">
+                                <div className="flex items-center justify-between border-b border-gray-200 pb-2">
+                                  <h3 className="text-lg font-medium text-gray-900 flex items-center">
+                                    <Users className="h-5 w-5 mr-2 text-blue-600" />
+                                    {teamName}
+                                  </h3>
+                                  <Badge variant="outline" className="text-xs">
+                                    {teamMeetings.length} meeting{teamMeetings.length !== 1 ? 's' : ''}
+                                  </Badge>
+                                </div>
+                                <div className="space-y-3 pl-4">
+                                  {teamMeetings.map((meeting) => (
+                                    <div key={meeting.id} className="relative">
+                                      <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-blue-200"></div>
+                                      <div className="pl-4">
+                                        <div className="flex items-center justify-between mb-2">
+                                          <div className="flex items-center space-x-2">
+                                            <Badge variant="secondary" className="text-xs">
+                                              <Calendar className="h-3 w-3 mr-1" />
+                                              {formatShortDate(meeting.date)}
+                                            </Badge>
+                                            {meeting.teamId && isTeamAdmin(meeting.teamId) && (
+                                              <Badge variant="outline" className="text-xs">
+                                                Admin
+                                              </Badge>
+                                            )}
+                                          </div>
+                                        </div>
+                                        <MeetingCard
+                                          meeting={meeting}
+                                          onViewReport={handleViewReport}
+                                          onDelete={handleDeleteMeeting}
+                                          showTeamControls={meeting.teamId ? isTeamAdmin(meeting.teamId) : false}
+                                          onTaskAssign={meeting.teamId ? handleTaskAssignment : undefined}
+                                          teamMembers={meeting.teamId ? teams.find(t => t.id === meeting.teamId)?.members || [] : []}
+                                        />
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ))
+                          })()
+                        ) : (
+                          /* Show meetings for specific team */
+                          <div className="space-y-4">
+                            <div className="flex items-center justify-between border-b border-gray-200 pb-3">
+                              <h3 className="text-lg font-medium text-gray-900 flex items-center">
+                                <Users className="h-5 w-5 mr-2 text-blue-600" />
+                                {getTeamName(selectedTeamFilter)} Meetings
+                              </h3>
+                              <div className="flex items-center space-x-2">
                                 <Badge variant="outline" className="text-xs">
-                                  Admin
+                                  {getFilteredMeetings().length} meeting{getFilteredMeetings().length !== 1 ? 's' : ''}
                                 </Badge>
-                              )}
+                                {isTeamAdmin(selectedTeamFilter) && (
+                                  <Badge variant="secondary" className="text-xs">
+                                    Admin
+                                  </Badge>
+                                )}
+                              </div>
                             </div>
-                            <MeetingCard
-                              meeting={meeting}
-                              onViewReport={handleViewReport}
-                              onDelete={handleDeleteMeeting}
-                              showTeamControls={meeting.teamId ? isTeamAdmin(meeting.teamId) : false}
-                              onTaskAssign={meeting.teamId ? handleTaskAssignment : undefined}
-                              teamMembers={meeting.teamId ? teams.find(t => t.id === meeting.teamId)?.members || [] : []}
-                            />
+                            {getFilteredMeetings().map((meeting) => (
+                              <div key={meeting.id} className="space-y-2">
+                                <div className="flex items-center justify-between">
+                                  <Badge variant="secondary" className="text-xs">
+                                    <Calendar className="h-3 w-3 mr-1" />
+                                    {formatShortDate(meeting.date)}
+                                  </Badge>
+                                  <div className="flex items-center space-x-1">
+                                    <span className="text-xs text-gray-500">
+                                      {meeting.actionItems.length} task{meeting.actionItems.length !== 1 ? 's' : ''}
+                                    </span>
+                                  </div>
+                                </div>
+                                <MeetingCard
+                                  meeting={meeting}
+                                  onViewReport={handleViewReport}
+                                  onDelete={handleDeleteMeeting}
+                                  showTeamControls={meeting.teamId ? isTeamAdmin(meeting.teamId) : false}
+                                  onTaskAssign={meeting.teamId ? handleTaskAssignment : undefined}
+                                  teamMembers={meeting.teamId ? teams.find(t => t.id === meeting.teamId)?.members || [] : []}
+                                />
+                              </div>
+                            ))}
                           </div>
-                        ))}
+                        )}
                       </div>
                     )}
                   </TabsContent>
@@ -694,6 +868,70 @@ export default function Dashboard() {
                 </CardContent>
               </Card>
 
+              {/* Team Meeting Analytics */}
+              {teams.length > 0 && activeTab === 'team' && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg flex items-center">
+                      <Users className="h-4 w-4 mr-2" />
+                      Team Analytics
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {(() => {
+                      const analytics = getTeamMeetingAnalytics()
+                      return (
+                        <>
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm text-gray-600">Total Team Meetings</span>
+                            <span className="font-semibold">{analytics.totalTeamMeetings}</span>
+                          </div>
+                          
+                          {analytics.meetingsByTeam.size > 0 && (
+                            <div className="space-y-2">
+                              <h4 className="text-sm font-medium text-gray-700">Meetings by Team</h4>
+                              {Array.from(analytics.meetingsByTeam.entries()).map(([teamName, count]) => (
+                                <div key={teamName} className="flex justify-between items-center text-sm">
+                                  <span className="text-gray-600 truncate">{teamName}</span>
+                                  <span className="font-medium">{count}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          
+                          {analytics.tasksByTeam.size > 0 && (
+                            <div className="space-y-2">
+                              <h4 className="text-sm font-medium text-gray-700">Tasks by Team</h4>
+                              {Array.from(analytics.tasksByTeam.entries()).map(([teamName, count]) => (
+                                <div key={teamName} className="flex justify-between items-center text-sm">
+                                  <span className="text-gray-600 truncate">{teamName}</span>
+                                  <span className="font-medium">{count}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          
+                          {analytics.recentTeamActivity.length > 0 && (
+                            <div className="space-y-2">
+                              <h4 className="text-sm font-medium text-gray-700">Recent Activity</h4>
+                              {analytics.recentTeamActivity.map((meeting) => (
+                                <div key={meeting.id} className="text-xs text-gray-500">
+                                  <div className="truncate">{meeting.title}</div>
+                                  <div className="flex justify-between">
+                                    <span>{getTeamName(meeting.teamId!)}</span>
+                                    <span>{formatShortDate(meeting.date)}</span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </>
+                      )
+                    })()}
+                  </CardContent>
+                </Card>
+              )}
+
               {/* Team Overview */}
               {teams.length > 0 && (
                 <Card>
@@ -759,6 +997,7 @@ export default function Dashboard() {
             </div>
           </ResponsiveGrid>
         </div>
+        </PullToRefresh>
       </ResponsiveContainer>
     </div>
   )

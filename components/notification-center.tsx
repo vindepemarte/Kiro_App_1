@@ -12,6 +12,9 @@ import { notificationService } from '../lib/notification-service';
 import { Notification } from '../lib/types';
 import { useAuth } from '../contexts/auth-context';
 import { NotificationPreferences } from './notification-preferences';
+import { useAsyncOperation } from '../hooks/use-async-operation';
+import { LoadingSpinner, ErrorState, RetryButton } from './ui/loading-states';
+import { useNetworkStatus } from '../hooks/use-network-status';
 
 interface NotificationCenterProps {
   isOpen: boolean;
@@ -20,34 +23,54 @@ interface NotificationCenterProps {
 
 export function NotificationCenter({ isOpen, onClose }: NotificationCenterProps) {
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const { user } = useAuth();
   const { toast } = useToast();
+  const { isOnline, retryWhenOnline } = useNetworkStatus();
+  
+  // Use async operation hook for loading notifications
+  const notificationLoader = useAsyncOperation<Notification[]>({
+    onError: (error) => {
+      toast({
+        title: 'Error',
+        description: 'Failed to load notifications',
+        variant: 'destructive',
+      });
+    }
+  });
+
+  // Use async operation hook for notification actions
+  const notificationActions = useAsyncOperation({
+    onSuccess: (result) => {
+      if (result?.message) {
+        toast({
+          title: 'Success',
+          description: result.message,
+        });
+      }
+    },
+    onError: (error) => {
+      toast({
+        title: 'Error',
+        description: error.message,
+        variant: 'destructive',
+      });
+    }
+  });
 
   // Load notifications on mount and when user changes
   useEffect(() => {
     if (!user?.uid || !isOpen) return;
 
     const loadNotifications = async () => {
-      try {
-        setLoading(true);
-        const userNotifications = await notificationService.getUserNotifications(user.uid);
-        setNotifications(userNotifications);
-      } catch (error) {
-        console.error('Failed to load notifications:', error);
-        toast({
-          title: 'Error',
-          description: 'Failed to load notifications',
-          variant: 'destructive',
-        });
-      } finally {
-        setLoading(false);
+      if (isOnline) {
+        return await notificationService.getUserNotifications(user.uid);
+      } else {
+        return await retryWhenOnline(() => notificationService.getUserNotifications(user.uid));
       }
     };
 
-    loadNotifications();
+    notificationLoader.execute(loadNotifications);
 
     // Subscribe to real-time updates
     const unsubscribe = notificationService.subscribeToNotifications(
@@ -58,80 +81,41 @@ export function NotificationCenter({ isOpen, onClose }: NotificationCenterProps)
     );
 
     return unsubscribe;
-  }, [user?.uid, isOpen, toast]);
+  }, [user?.uid, isOpen, isOnline]);
 
   // Handle accepting team invitation
   const handleAcceptInvitation = async (notificationId: string) => {
     if (!user?.uid) return;
 
-    try {
-      setActionLoading(notificationId);
+    await notificationActions.execute(async () => {
       await notificationService.acceptTeamInvitation(notificationId, user.uid);
-      
-      toast({
-        title: 'Success',
-        description: 'Team invitation accepted successfully',
-      });
-    } catch (error) {
-      console.error('Failed to accept invitation:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to accept team invitation',
-        variant: 'destructive',
-      });
-    } finally {
-      setActionLoading(null);
-    }
+      return { message: 'Team invitation accepted successfully' };
+    });
   };
 
   // Handle declining team invitation
   const handleDeclineInvitation = async (notificationId: string) => {
-    try {
-      setActionLoading(notificationId);
-      await notificationService.declineTeamInvitation(notificationId);
-      
-      toast({
-        title: 'Success',
-        description: 'Team invitation declined',
-      });
-    } catch (error) {
-      console.error('Failed to decline invitation:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to decline team invitation',
-        variant: 'destructive',
-      });
-    } finally {
-      setActionLoading(null);
-    }
+    if (!user?.uid) return;
+
+    await notificationActions.execute(async () => {
+      await notificationService.declineTeamInvitation(notificationId, user.uid);
+      return { message: 'Team invitation declined' };
+    });
   };
 
   // Handle marking notification as read
   const handleMarkAsRead = async (notificationId: string) => {
-    try {
+    await notificationActions.execute(async () => {
       await notificationService.markAsRead(notificationId);
-    } catch (error) {
-      console.error('Failed to mark as read:', error);
-    }
+    });
   };
 
   // Handle deleting notification
   const handleDeleteNotification = async (notificationId: string) => {
-    try {
+    await notificationActions.execute(async () => {
       await notificationService.deleteNotification(notificationId);
-      
-      toast({
-        title: 'Success',
-        description: 'Notification deleted',
-      });
-    } catch (error) {
-      console.error('Failed to delete notification:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to delete notification',
-        variant: 'destructive',
-      });
-    }
+      return { message: 'Notification deleted' };
+    });
   };
 
   // Get notification icon based on type
@@ -173,15 +157,21 @@ export function NotificationCenter({ isOpen, onClose }: NotificationCenterProps)
     <div className="fixed inset-0 z-50 bg-black/50" onClick={onClose}>
       <div 
         className={`
-          fixed bg-white shadow-lg border
-          /* Mobile: full screen modal */
-          inset-x-4 inset-y-4 rounded-lg
+          fixed bg-white shadow-lg border transition-all duration-300 ease-out
+          /* Mobile: full screen modal with safe areas */
+          inset-x-2 inset-y-4 rounded-xl
           /* Tablet: positioned modal */
-          sm:right-4 sm:top-16 sm:left-auto sm:bottom-auto sm:w-96 sm:max-h-[80vh]
+          sm:right-4 sm:top-16 sm:left-auto sm:bottom-auto sm:w-96 sm:max-h-[85vh] sm:rounded-lg
           /* Desktop: positioned modal */
           md:right-4 md:top-16 md:left-auto md:bottom-auto md:w-96 md:max-h-[80vh]
           lg:right-4 lg:top-16 lg:left-auto lg:bottom-auto lg:w-96 lg:max-h-[80vh]
+          /* Enhanced mobile styling */
+          animate-slide-up
         `}
+        style={{ 
+          paddingBottom: 'env(safe-area-inset-bottom)',
+          maxHeight: 'calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 2rem)'
+        }}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
@@ -236,9 +226,18 @@ export function NotificationCenter({ isOpen, onClose }: NotificationCenterProps)
           
           <CardContent className="p-0">
             <ScrollArea className="h-[60vh]">
-              {loading ? (
-                <div className="p-4 text-center text-gray-500">
-                  Loading notifications...
+              {notificationLoader.state.loading ? (
+                <div className="p-4">
+                  <LoadingSpinner text="Loading notifications..." />
+                </div>
+              ) : notificationLoader.state.error ? (
+                <div className="p-4">
+                  <ErrorState
+                    title="Failed to load notifications"
+                    message={notificationLoader.state.error}
+                    onRetry={() => notificationLoader.retry()}
+                    variant={isOnline ? 'error' : 'network'}
+                  />
                 </div>
               ) : notifications.length === 0 ? (
                 <div className="p-4 text-center text-gray-500">
@@ -308,7 +307,7 @@ export function NotificationCenter({ isOpen, onClose }: NotificationCenterProps)
                                     e.stopPropagation();
                                     handleDeclineInvitation(notification.id);
                                   }}
-                                  disabled={actionLoading === notification.id}
+                                  disabled={notificationActions.state.loading}
                                   className={`
                                     h-10 px-3 text-sm min-h-[44px] min-w-[80px]
                                     sm:h-7 sm:px-2 sm:text-xs sm:min-h-[28px] sm:min-w-[60px]
@@ -325,7 +324,7 @@ export function NotificationCenter({ isOpen, onClose }: NotificationCenterProps)
                                     e.stopPropagation();
                                     handleAcceptInvitation(notification.id);
                                   }}
-                                  disabled={actionLoading === notification.id}
+                                  disabled={notificationActions.state.loading}
                                   className={`
                                     h-10 px-3 text-sm min-h-[44px] min-w-[80px]
                                     sm:h-7 sm:px-2 sm:text-xs sm:min-h-[28px] sm:min-w-[60px]

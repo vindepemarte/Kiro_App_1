@@ -11,6 +11,25 @@ const getToast = async () => {
   }
 };
 
+// Dynamic imports for monitoring services to avoid circular dependencies
+const getErrorTracker = async () => {
+  try {
+    const { default: errorTracker } = await import('./error-tracker');
+    return errorTracker;
+  } catch (error) {
+    return null;
+  }
+};
+
+const getLogger = async () => {
+  try {
+    const { default: logger } = await import('./logger');
+    return logger;
+  } catch (error) {
+    return null;
+  }
+};
+
 export interface ErrorDetails {
   message: string;
   code?: string;
@@ -219,7 +238,7 @@ export class ErrorHandler {
   static handleError(error: unknown, context?: string): AppError {
     const appError = this.normalizeError(error);
     
-    // Log error for debugging
+    // Log error for debugging (console fallback)
     console.error(`Error in ${context || 'unknown context'}:`, {
       message: appError.message,
       code: appError.code,
@@ -230,10 +249,46 @@ export class ErrorHandler {
       timestamp: new Date().toISOString(),
     });
     
+    // Integrate with monitoring services (async, don't wait)
+    this.integrateWithMonitoring(appError, context).catch(console.error);
+    
     // Show toast notification based on severity (async, but don't wait)
     this.showErrorToast(appError, context).catch(console.error);
     
     return appError;
+  }
+
+  /**
+   * Integrate error with monitoring services
+   */
+  private static async integrateWithMonitoring(error: AppError, context?: string): Promise<void> {
+    try {
+      // Log to structured logger
+      const logger = await getLogger();
+      if (logger) {
+        logger.error(error.message, error.originalError || error, context, {
+          code: error.code,
+          severity: error.severity,
+          retryable: error.retryable,
+          userMessage: error.userMessage
+        });
+      }
+
+      // Track error for analytics and reporting
+      const errorTracker = await getErrorTracker();
+      if (errorTracker) {
+        errorTracker.captureError(error.originalError || error, {
+          component: context,
+          operation: 'error_handler',
+          code: error.code,
+          severity: error.severity,
+          retryable: error.retryable
+        });
+      }
+    } catch (monitoringError) {
+      // Don't let monitoring errors break the main error flow
+      console.warn('Failed to integrate with monitoring services:', monitoringError);
+    }
   }
 
   /**

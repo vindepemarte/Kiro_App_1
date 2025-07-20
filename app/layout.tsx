@@ -6,6 +6,7 @@ import { ThemeProvider } from "@/components/theme-provider"
 import { AuthProvider } from "@/contexts/auth-context"
 import { Toaster } from "@/components/ui/toaster"
 import { ErrorBoundary } from "@/components/error-boundary"
+import { GlobalLoadingErrorDisplay } from "@/components/global-loading-error-display"
 
 const inter = Inter({ subsets: ["latin"] })
 
@@ -44,6 +45,7 @@ export default function RootLayout({
             <AuthProvider>
               {children}
               <Toaster />
+              <GlobalLoadingErrorDisplay />
             </AuthProvider>
           </ThemeProvider>
         </ErrorBoundary>

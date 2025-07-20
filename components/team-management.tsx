@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -41,10 +41,27 @@ import {
 } from "lucide-react"
 import { useAuth } from "@/contexts/auth-context"
 import { Team, TeamMember, CreateTeamData, User as UserType } from "@/lib/types"
-import { databaseService, createTeam, getUserTeams } from "@/lib/database"
+import { 
+  databaseService, 
+  createTeam, 
+  getUserTeams, 
+  addTeamMember, 
+  removeTeamMember, 
+  updateTeamMember, 
+  updateTeam,
+  deleteTeam,
+  subscribeToUserTeams,
+  searchUserByEmail,
+  createNotification
+} from "@/lib/database"
 import { getTeamService } from "@/lib/team-service"
 import { useMobile } from "@/hooks/use-mobile"
+import { useUserTeamsRealtime, useTeamMemberUpdates } from "@/hooks/use-team-realtime"
 import { ResponsiveGrid, ResponsiveContainer } from "@/components/ui/responsive-grid"
+import { useAsyncOperation } from "@/hooks/use-async-operation"
+import { LoadingStateManager } from "@/lib/loading-state-manager"
+import { LoadingSpinner, ErrorState, LoadingOverlay, SkeletonCard } from "@/components/ui/loading-states"
+import { useNetworkStatus } from "@/hooks/use-network-status"
 
 interface TeamManagementProps {
   className?: string
@@ -55,10 +72,21 @@ export function TeamManagement({ className }: TeamManagementProps) {
   const isMobile = useMobile()
   const teamService = getTeamService(databaseService)
   
-  // State management
-  const [teams, setTeams] = useState<Team[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  // Use real-time hooks for better performance and error handling
+  const { 
+    teams, 
+    loading, 
+    error, 
+    isTeamAdmin: checkIsTeamAdmin, 
+    canManageTeam 
+  } = useUserTeamsRealtime(user?.uid || null)
+  
+  const { 
+    operationLoading, 
+    operationError, 
+    executeOperation, 
+    clearError 
+  } = useTeamMemberUpdates()
   
   // Dialog states
   const [showCreateTeam, setShowCreateTeam] = useState(false)
@@ -75,45 +103,19 @@ export function TeamManagement({ className }: TeamManagementProps) {
     email: '',
     displayName: ''
   })
+  const [teamSettingsForm, setTeamSettingsForm] = useState({
+    name: '',
+    description: ''
+  })
   const [searchResults, setSearchResults] = useState<UserType | null>(null)
   const [searching, setSearching] = useState(false)
   
-  // Operation states
-  const [operationLoading, setOperationLoading] = useState(false)
-  const [operationError, setOperationError] = useState<string | null>(null)
+  // No need for manual loading since we're using real-time hooks
 
-  // Load user teams on mount
-  useEffect(() => {
-    if (!user) {
-      setTeams([])
-      setLoading(false)
-      return
-    }
-
-    loadUserTeams()
-  }, [user])
-
-  const loadUserTeams = async () => {
-    try {
-      setLoading(true)
-      setError(null)
-      const userTeams = await getUserTeams(user!.uid)
-      setTeams(userTeams)
-    } catch (err) {
-      console.error('Error loading teams:', err)
-      setError(err instanceof Error ? err.message : 'Failed to load teams')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleCreateTeam = async () => {
+  const handleCreateTeam = useCallback(async () => {
     if (!user || !createTeamForm.name.trim()) return
 
-    try {
-      setOperationLoading(true)
-      setOperationError(null)
-
+    await executeOperation(async () => {
       // Check if we're in browser environment
       if (typeof window === 'undefined') {
         throw new Error('Team creation is only available in browser environment')
@@ -137,25 +139,17 @@ export function TeamManagement({ className }: TeamManagementProps) {
       setCreateTeamForm({ name: '', description: '' })
       setShowCreateTeam(false)
       
-      // Reload teams
-      await loadUserTeams()
-    } catch (err) {
-      console.error('Error creating team:', err)
-      const errorMessage = err instanceof Error ? err.message : 'Failed to create team'
-      setOperationError(errorMessage)
-    } finally {
-      setOperationLoading(false)
-    }
-  }
+      // Teams will update automatically via real-time listener
+    })
+  }, [user, createTeamForm, executeOperation])
 
-  const handleSearchUser = async () => {
+  const handleSearchUser = useCallback(async () => {
     if (!inviteMemberForm.email.trim()) return
 
-    try {
+    await executeOperation(async () => {
       setSearching(true)
-      setOperationError(null)
       
-      const foundUser = await teamService.searchUserByEmail(inviteMemberForm.email.trim())
+      const foundUser = await searchUserByEmail(inviteMemberForm.email.trim())
       setSearchResults(foundUser)
       
       if (foundUser && !inviteMemberForm.displayName) {
@@ -164,27 +158,41 @@ export function TeamManagement({ className }: TeamManagementProps) {
           displayName: foundUser.displayName || foundUser.email?.split('@')[0] || ''
         }))
       }
-    } catch (err) {
-      setOperationError(err instanceof Error ? err.message : 'Failed to search user')
-      setSearchResults(null)
-    } finally {
+      
       setSearching(false)
-    }
-  }
+    })
+  }, [inviteMemberForm.email, inviteMemberForm.displayName, executeOperation])
 
-  const handleInviteMember = async () => {
+  const handleInviteMember = useCallback(async () => {
     if (!user || !selectedTeam || !inviteMemberForm.email.trim() || !inviteMemberForm.displayName.trim()) return
 
-    try {
-      setOperationLoading(true)
-      setOperationError(null)
+    await executeOperation(async () => {
+      // Add user as invited member directly
+      const newMember: Omit<TeamMember, 'joinedAt'> = {
+        userId: searchResults?.uid || `temp-${Date.now()}`,
+        email: inviteMemberForm.email.toLowerCase(),
+        displayName: inviteMemberForm.displayName.trim(),
+        role: 'member',
+        status: 'invited'
+      }
 
-      await teamService.inviteUserToTeam(
-        selectedTeam.id,
-        user.uid,
-        inviteMemberForm.email.trim(),
-        inviteMemberForm.displayName.trim()
-      )
+      await addTeamMember(selectedTeam.id, newMember)
+
+      // Create invitation notification
+      if (searchResults) {
+        await createNotification({
+          userId: searchResults.uid,
+          type: 'team_invitation',
+          title: `Team Invitation: ${selectedTeam.name}`,
+          message: `You have been invited to join the team "${selectedTeam.name}"`,
+          data: {
+            teamId: selectedTeam.id,
+            teamName: selectedTeam.name,
+            inviterId: user.uid,
+            inviterName: user.displayName || user.email || 'Team Admin',
+          }
+        })
+      }
 
       // Reset form and close dialog
       setInviteMemberForm({ email: '', displayName: '' })
@@ -192,68 +200,56 @@ export function TeamManagement({ className }: TeamManagementProps) {
       setShowInviteMember(false)
       setSelectedTeam(null)
       
-      // Reload teams
-      await loadUserTeams()
-    } catch (err) {
-      setOperationError(err instanceof Error ? err.message : 'Failed to invite member')
-    } finally {
-      setOperationLoading(false)
-    }
-  }
+      // Teams will update automatically via real-time listener
+    })
+  }, [user, selectedTeam, inviteMemberForm, searchResults, executeOperation])
 
-  const handleRemoveMember = async (teamId: string, userId: string) => {
+  const handleRemoveMember = useCallback(async (teamId: string, userId: string) => {
     if (!user) return
 
-    try {
-      setOperationLoading(true)
-      setOperationError(null)
+    await executeOperation(async () => {
+      await removeTeamMember(teamId, userId)
+      // Teams will update automatically via real-time listener
+    })
+  }, [user, executeOperation])
 
-      await teamService.removeTeamMember(teamId, userId, user.uid)
-      
-      // Reload teams
-      await loadUserTeams()
-    } catch (err) {
-      setOperationError(err instanceof Error ? err.message : 'Failed to remove member')
-    } finally {
-      setOperationLoading(false)
-    }
-  }
-
-  const handleUpdateMemberRole = async (teamId: string, userId: string, role: TeamMember['role']) => {
+  const handleUpdateMemberRole = useCallback(async (teamId: string, userId: string, role: TeamMember['role']) => {
     if (!user) return
 
-    try {
-      setOperationLoading(true)
-      setOperationError(null)
+    await executeOperation(async () => {
+      await updateTeamMember(teamId, userId, { role })
+      // Teams will update automatically via real-time listener
+    })
+  }, [user, executeOperation])
 
-      await teamService.updateTeamMemberRole(teamId, userId, role, user.uid)
+  const handleUpdateTeam = useCallback(async () => {
+    if (!user || !selectedTeam || !teamSettingsForm.name.trim()) return
+
+    await executeOperation(async () => {
+      const updates: Partial<Team> = {
+        name: teamSettingsForm.name.trim(),
+        description: teamSettingsForm.description.trim()
+      }
+
+      await updateTeam(selectedTeam.id, updates)
       
-      // Reload teams
-      await loadUserTeams()
-    } catch (err) {
-      setOperationError(err instanceof Error ? err.message : 'Failed to update member role')
-    } finally {
-      setOperationLoading(false)
-    }
-  }
+      // Reset form and close dialog
+      setTeamSettingsForm({ name: '', description: '' })
+      setShowTeamSettings(false)
+      setSelectedTeam(null)
+      
+      // Teams will update automatically via real-time listener
+    })
+  }, [user, selectedTeam, teamSettingsForm, executeOperation])
 
-  const handleDeleteTeam = async (teamId: string) => {
+  const handleDeleteTeam = useCallback(async (teamId: string) => {
     if (!user) return
 
-    try {
-      setOperationLoading(true)
-      setOperationError(null)
-
-      await teamService.deleteTeam(teamId, user.uid)
-      
-      // Reload teams
-      await loadUserTeams()
-    } catch (err) {
-      setOperationError(err instanceof Error ? err.message : 'Failed to delete team')
-    } finally {
-      setOperationLoading(false)
-    }
-  }
+    await executeOperation(async () => {
+      await deleteTeam(teamId, user.uid)
+      // Teams will update automatically via real-time listener
+    })
+  }, [user, executeOperation])
 
   const isTeamAdmin = (team: Team): boolean => {
     if (!user) return false
@@ -330,10 +326,7 @@ export function TeamManagement({ className }: TeamManagementProps) {
               <Button 
                 variant="outline" 
                 size="sm" 
-                onClick={() => {
-                  setError(null)
-                  setOperationError(null)
-                }}
+                onClick={() => clearError()}
                 className="ml-2"
               >
                 Dismiss
@@ -344,10 +337,21 @@ export function TeamManagement({ className }: TeamManagementProps) {
 
         {/* Teams Grid */}
         {loading ? (
-          <div className="text-center py-12">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-            <p className="text-gray-600">Loading teams...</p>
-          </div>
+          <ResponsiveGrid 
+            cols={{ mobile: 1, tablet: 2, desktop: 3 }}
+            gap={{ mobile: 4, tablet: 6, desktop: 6 }}
+          >
+            {Array.from({ length: 3 }).map((_, index) => (
+              <SkeletonCard key={index} />
+            ))}
+          </ResponsiveGrid>
+        ) : error ? (
+          <ErrorState
+            title="Failed to load teams"
+            message={error}
+            onRetry={() => window.location.reload()}
+            variant="error"
+          />
         ) : teams.length === 0 ? (
           <Card>
             <CardContent className="text-center py-12">
@@ -380,6 +384,10 @@ export function TeamManagement({ className }: TeamManagementProps) {
                 onDeleteTeam={handleDeleteTeam}
                 onTeamSettings={(team) => {
                   setSelectedTeam(team)
+                  setTeamSettingsForm({
+                    name: team.name,
+                    description: team.description || ''
+                  })
                   setShowTeamSettings(true)
                 }}
                 getStatusIcon={getStatusIcon}
@@ -532,16 +540,46 @@ export function TeamManagement({ className }: TeamManagementProps) {
             
             {selectedTeam && (
               <div className="space-y-4">
-                <div>
-                  <Label>Team Name</Label>
-                  <p className="text-sm text-gray-600 mt-1">{selectedTeam.name}</p>
-                </div>
-                
-                {selectedTeam.description && (
-                  <div>
-                    <Label>Description</Label>
-                    <p className="text-sm text-gray-600 mt-1">{selectedTeam.description}</p>
-                  </div>
+                {/* Editable Team Information */}
+                {isTeamAdmin(selectedTeam) ? (
+                  <>
+                    <div>
+                      <Label htmlFor="settings-team-name">Team Name</Label>
+                      <Input
+                        id="settings-team-name"
+                        placeholder="Enter team name"
+                        value={teamSettingsForm.name}
+                        onChange={(e) => setTeamSettingsForm(prev => ({ ...prev, name: e.target.value }))}
+                        className="mt-1"
+                      />
+                    </div>
+                    
+                    <div>
+                      <Label htmlFor="settings-team-description">Description</Label>
+                      <Textarea
+                        id="settings-team-description"
+                        placeholder="Describe your team's purpose"
+                        value={teamSettingsForm.description}
+                        onChange={(e) => setTeamSettingsForm(prev => ({ ...prev, description: e.target.value }))}
+                        className="mt-1"
+                        rows={3}
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div>
+                      <Label>Team Name</Label>
+                      <p className="text-sm text-gray-600 mt-1">{selectedTeam.name}</p>
+                    </div>
+                    
+                    {selectedTeam.description && (
+                      <div>
+                        <Label>Description</Label>
+                        <p className="text-sm text-gray-600 mt-1">{selectedTeam.description}</p>
+                      </div>
+                    )}
+                  </>
                 )}
                 
                 <div>
@@ -591,10 +629,20 @@ export function TeamManagement({ className }: TeamManagementProps) {
                 onClick={() => {
                   setShowTeamSettings(false)
                   setSelectedTeam(null)
+                  setTeamSettingsForm({ name: '', description: '' })
                 }}
+                disabled={operationLoading}
               >
-                Close
+                Cancel
               </Button>
+              {selectedTeam && isTeamAdmin(selectedTeam) && (
+                <Button 
+                  onClick={handleUpdateTeam}
+                  disabled={!teamSettingsForm.name.trim() || operationLoading}
+                >
+                  {operationLoading ? 'Saving...' : 'Save Changes'}
+                </Button>
+              )}
             </DialogFooter>
           </DialogContent>
         </Dialog>

@@ -22,27 +22,29 @@ import {
   EyeOff
 } from "lucide-react"
 import { authService } from "@/lib/auth"
+import { userProfileService } from "@/lib/user-profile-service"
+import { UserProfile } from "@/lib/types"
 
 export default function SettingsPage() {
   const { user, loading, error } = useAuth()
   const router = useRouter()
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
   const [settings, setSettings] = useState({
     displayName: '',
     email: '',
     notifications: {
       taskAssignments: true,
       teamInvitations: true,
-      meetingUpdates: true,
-      emailNotifications: false
+      meetingAssignments: true,
     },
-    privacy: {
-      profileVisible: true,
-      shareAnalytics: false
-    }
+    theme: 'system' as UserProfile['preferences']['theme']
   })
   const [isEditing, setIsEditing] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [saveSuccess, setSaveSuccess] = useState(false)
+  const [successTimeoutId, setSuccessTimeoutId] = useState<NodeJS.Timeout | null>(null)
 
   // Redirect if not authenticated
   useEffect(() => {
@@ -51,16 +53,72 @@ export default function SettingsPage() {
     }
   }, [user, loading, router])
 
-  // Load user settings
+  // Load user profile and settings
   useEffect(() => {
-    if (user) {
-      setSettings(prev => ({
-        ...prev,
-        displayName: user.displayName || '',
-        email: user.email || ''
-      }))
+    if (!user) {
+      setIsLoading(false)
+      return
     }
+
+    const loadUserProfile = async () => {
+      try {
+        setIsLoading(true)
+        setSaveError(null)
+
+        // Try to get existing user profile
+        let profile = await userProfileService.getProfile(user.uid)
+        
+        // If no profile exists, create one with default settings
+        if (!profile) {
+          await userProfileService.createProfile(user.uid, user)
+          profile = await userProfileService.getProfile(user.uid)
+        }
+
+        if (profile) {
+          setUserProfile(profile)
+          setSettings({
+            displayName: profile.displayName,
+            email: profile.email,
+            notifications: {
+              taskAssignments: profile.preferences.notifications.taskAssignments,
+              teamInvitations: profile.preferences.notifications.teamInvitations,
+              meetingAssignments: profile.preferences.notifications.meetingAssignments,
+            },
+            theme: profile.preferences.theme
+          })
+        } else {
+          // Fallback to user auth data
+          setSettings(prev => ({
+            ...prev,
+            displayName: user.displayName || '',
+            email: user.email || ''
+          }))
+        }
+      } catch (error) {
+        console.error('Failed to load user profile:', error)
+        setSaveError('Failed to load user settings')
+        // Fallback to user auth data
+        setSettings(prev => ({
+          ...prev,
+          displayName: user.displayName || '',
+          email: user.email || ''
+        }))
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    loadUserProfile()
   }, [user])
+
+  // Cleanup timeouts on unmount
+  useEffect(() => {
+    return () => {
+      if (successTimeoutId) {
+        clearTimeout(successTimeoutId)
+      }
+    }
+  }, [successTimeoutId])
 
   const handleLogout = async () => {
     try {
@@ -71,21 +129,160 @@ export default function SettingsPage() {
     }
   }
 
+  const validateSettings = (): string | null => {
+    if (!settings.displayName.trim()) {
+      return 'Display name is required'
+    }
+    if (settings.displayName.length > 50) {
+      return 'Display name must be 50 characters or less'
+    }
+    if (!settings.email.trim()) {
+      return 'Email address is required'
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(settings.email)) {
+      return 'Please enter a valid email address'
+    }
+    return null
+  }
+
   const handleSaveSettings = async () => {
+    if (!user) return
+
+    // Validate settings before saving
+    const validationError = validateSettings()
+    if (validationError) {
+      setSaveError(validationError)
+      return
+    }
+
     setIsSaving(true)
     setSaveError(null)
+    setSaveSuccess(false)
 
     try {
-      // In a real app, you would save settings to the database
-      // For now, we'll just simulate a save operation
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      // Update user profile with new settings
+      const profileUpdates: Partial<UserProfile> = {
+        displayName: settings.displayName.trim(),
+        email: settings.email.trim(),
+        preferences: {
+          notifications: {
+            teamInvitations: settings.notifications.teamInvitations,
+            meetingAssignments: settings.notifications.meetingAssignments,
+            taskAssignments: settings.notifications.taskAssignments,
+          },
+          theme: settings.theme,
+        }
+      }
+
+      await userProfileService.updateProfile(user.uid, profileUpdates)
+      
+      // Reload the profile to get the updated data
+      const updatedProfile = await userProfileService.getProfile(user.uid)
+      if (updatedProfile) {
+        setUserProfile(updatedProfile)
+        // Update local settings state to match saved data
+        setSettings({
+          displayName: updatedProfile.displayName,
+          email: updatedProfile.email,
+          notifications: {
+            taskAssignments: updatedProfile.preferences.notifications.taskAssignments,
+            teamInvitations: updatedProfile.preferences.notifications.teamInvitations,
+            meetingAssignments: updatedProfile.preferences.notifications.meetingAssignments,
+          },
+          theme: updatedProfile.preferences.theme
+        })
+      }
       
       setIsEditing(false)
-      // Show success message (you could use a toast here)
+      setSaveSuccess(true)
+      
+      // Clear success message after 5 seconds with proper cleanup
+      if (successTimeoutId) {
+        clearTimeout(successTimeoutId)
+      }
+      const timeoutId = setTimeout(() => setSaveSuccess(false), 5000)
+      setSuccessTimeoutId(timeoutId)
     } catch (error) {
-      setSaveError('Failed to save settings. Please try again.')
+      console.error('Failed to save settings:', error)
+      const errorMessage = error instanceof Error ? error.message : 'Failed to save settings. Please try again.'
+      setSaveError(errorMessage)
     } finally {
       setIsSaving(false)
+    }
+  }
+
+  const handleNotificationChange = async (type: keyof typeof settings.notifications, value: boolean) => {
+    if (!user) return
+
+    // Update local state immediately for responsive UI
+    setSettings(prev => ({
+      ...prev,
+      notifications: {
+        ...prev.notifications,
+        [type]: value
+      }
+    }))
+
+    try {
+      // Save notification preference immediately
+      await userProfileService.updateNotificationPreferences(user.uid, {
+        ...settings.notifications,
+        [type]: value
+      })
+      
+      // Show brief success feedback
+      setSaveSuccess(true)
+      if (successTimeoutId) {
+        clearTimeout(successTimeoutId)
+      }
+      const timeoutId = setTimeout(() => setSaveSuccess(false), 2000)
+      setSuccessTimeoutId(timeoutId)
+    } catch (error) {
+      console.error('Failed to save notification preference:', error)
+      // Revert the change on error
+      setSettings(prev => ({
+        ...prev,
+        notifications: {
+          ...prev.notifications,
+          [type]: !value
+        }
+      }))
+      setSaveError('Failed to save notification preference')
+      // Clear error message after 3 seconds
+      setTimeout(() => setSaveError(null), 3000)
+    }
+  }
+
+  const handleThemeChange = async (theme: UserProfile['preferences']['theme']) => {
+    if (!user) return
+
+    // Update local state immediately for responsive UI
+    setSettings(prev => ({
+      ...prev,
+      theme
+    }))
+
+    try {
+      // Save theme preference immediately
+      await userProfileService.updateTheme(user.uid, theme)
+      
+      // Show brief success feedback
+      setSaveSuccess(true)
+      if (successTimeoutId) {
+        clearTimeout(successTimeoutId)
+      }
+      const timeoutId = setTimeout(() => setSaveSuccess(false), 2000)
+      setSuccessTimeoutId(timeoutId)
+    } catch (error) {
+      console.error('Failed to save theme preference:', error)
+      // Revert the change on error
+      setSettings(prev => ({
+        ...prev,
+        theme: userProfile?.preferences.theme || 'system'
+      }))
+      setSaveError('Failed to save theme preference')
+      // Clear error message after 3 seconds
+      setTimeout(() => setSaveError(null), 3000)
     }
   }
 
@@ -157,6 +354,17 @@ export default function SettingsPage() {
                 <div className="flex items-center gap-2 text-red-700">
                   <AlertCircle className="h-4 w-4" />
                   <span>{saveError}</span>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {saveSuccess && (
+            <Card className="mb-6 border-green-200 bg-green-50">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-2 text-green-700">
+                  <Save className="h-4 w-4" />
+                  <span>Settings saved successfully!</span>
                 </div>
               </CardContent>
             </Card>
@@ -262,13 +470,7 @@ export default function SettingsPage() {
                   </div>
                   <Switch
                     checked={settings.notifications.taskAssignments}
-                    onCheckedChange={(checked) => setSettings(prev => ({
-                      ...prev,
-                      notifications: {
-                        ...prev.notifications,
-                        taskAssignments: checked
-                      }
-                    }))}
+                    onCheckedChange={(checked) => handleNotificationChange('taskAssignments', checked)}
                   />
                 </div>
 
@@ -281,104 +483,53 @@ export default function SettingsPage() {
                   </div>
                   <Switch
                     checked={settings.notifications.teamInvitations}
-                    onCheckedChange={(checked) => setSettings(prev => ({
-                      ...prev,
-                      notifications: {
-                        ...prev.notifications,
-                        teamInvitations: checked
-                      }
-                    }))}
+                    onCheckedChange={(checked) => handleNotificationChange('teamInvitations', checked)}
                   />
                 </div>
 
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
-                    <Label>Meeting Updates</Label>
+                    <Label>Meeting Assignments</Label>
                     <p className="text-sm text-gray-600">
-                      Get notified about meeting processing and updates
+                      Get notified when meetings are assigned to your teams
                     </p>
                   </div>
                   <Switch
-                    checked={settings.notifications.meetingUpdates}
-                    onCheckedChange={(checked) => setSettings(prev => ({
-                      ...prev,
-                      notifications: {
-                        ...prev.notifications,
-                        meetingUpdates: checked
-                      }
-                    }))}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>Email Notifications</Label>
-                    <p className="text-sm text-gray-600">
-                      Receive notifications via email
-                    </p>
-                  </div>
-                  <Switch
-                    checked={settings.notifications.emailNotifications}
-                    onCheckedChange={(checked) => setSettings(prev => ({
-                      ...prev,
-                      notifications: {
-                        ...prev.notifications,
-                        emailNotifications: checked
-                      }
-                    }))}
+                    checked={settings.notifications.meetingAssignments}
+                    onCheckedChange={(checked) => handleNotificationChange('meetingAssignments', checked)}
                   />
                 </div>
               </CardContent>
             </Card>
 
-            {/* Privacy Settings */}
+            {/* Theme Settings */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <Shield className="h-5 w-5" />
-                  Privacy & Security
+                  Appearance & Theme
                 </CardTitle>
                 <CardDescription>
-                  Control your privacy and data sharing preferences
+                  Customize your app appearance and theme preferences
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
-                    <Label>Profile Visibility</Label>
+                    <Label>Theme</Label>
                     <p className="text-sm text-gray-600">
-                      Allow team members to see your profile information
+                      Choose your preferred theme for the application
                     </p>
                   </div>
-                  <Switch
-                    checked={settings.privacy.profileVisible}
-                    onCheckedChange={(checked) => setSettings(prev => ({
-                      ...prev,
-                      privacy: {
-                        ...prev.privacy,
-                        profileVisible: checked
-                      }
-                    }))}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>Share Analytics</Label>
-                    <p className="text-sm text-gray-600">
-                      Help improve the service by sharing anonymous usage data
-                    </p>
-                  </div>
-                  <Switch
-                    checked={settings.privacy.shareAnalytics}
-                    onCheckedChange={(checked) => setSettings(prev => ({
-                      ...prev,
-                      privacy: {
-                        ...prev.privacy,
-                        shareAnalytics: checked
-                      }
-                    }))}
-                  />
+                  <select
+                    value={settings.theme}
+                    onChange={(e) => handleThemeChange(e.target.value as UserProfile['preferences']['theme'])}
+                    className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="light">Light</option>
+                    <option value="dark">Dark</option>
+                    <option value="system">System</option>
+                  </select>
                 </div>
               </CardContent>
             </Card>

@@ -11,6 +11,9 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./lib/__tests__/setup.ts'],
     globals: true,
+    typecheck: {
+      enabled: false
+    }
   },
   resolve: {
     alias: {

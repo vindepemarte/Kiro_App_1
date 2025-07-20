@@ -148,7 +148,8 @@ export function getFirebaseAuth(): Auth {
 
 export function getFirebaseDb(): Firestore {
   if (typeof window === 'undefined') {
-    throw new Error('Firebase db cannot be initialized during build time');
+    // Return a mock Firestore instance for SSR/build time
+    return {} as Firestore;
   }
   const { db } = initializeFirebase();
   if (!db) throw new Error('Firebase db not initialized');

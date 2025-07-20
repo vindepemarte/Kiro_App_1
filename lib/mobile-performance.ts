@@ -281,7 +281,12 @@ export function useMemoryMonitor() {
 
 // Network status monitoring
 export function useNetworkStatus() {
-  const [isOnline, setIsOnline] = useState(navigator.onLine)
+  const [isOnline, setIsOnline] = useState(() => {
+    if (typeof window === 'undefined' || typeof navigator === 'undefined') {
+      return true; // Assume online during SSR
+    }
+    return navigator.onLine;
+  })
   const [connectionType, setConnectionType] = useState<string>('unknown')
 
   useEffect(() => {

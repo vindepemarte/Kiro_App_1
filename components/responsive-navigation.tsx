@@ -61,6 +61,7 @@ export function ResponsiveNavigation({
             sm:px-6 sm:py-4
             md:px-4 md:py-3
             lg:px-6 lg:py-4
+            transition-all duration-200
           `}>
             {/* Logo */}
             <div className="flex items-center space-x-2">

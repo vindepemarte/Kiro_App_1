@@ -1,0 +1,83 @@
+{
+  "timestamp": "2025-07-20T19:35:33.003Z",
+  "totalTests": 5,
+  "results": [
+    {
+      "label": "cache-performance",
+      "duration": 98.99970799684525,
+      "timestamp": "2025-07-20T19:35:19.951Z"
+    },
+    {
+      "label": "query-optimization",
+      "duration": 408.29279202222824,
+      "timestamp": "2025-07-20T19:35:20.359Z"
+    },
+    {
+      "label": "listener-performance",
+      "duration": 654.7915000319481,
+      "timestamp": "2025-07-20T19:35:21.014Z"
+    },
+    {
+      "label": "concurrent-operations",
+      "duration": 1254.9481250047684,
+      "timestamp": "2025-07-20T19:35:22.269Z"
+    },
+    {
+      "label": "memory-usage",
+      "duration": 10732.24941700697,
+      "timestamp": "2025-07-20T19:35:33.002Z"
+    }
+  ],
+  "summary": {
+    "averageDuration": 2629.8563084125517,
+    "fastestTest": {
+      "label": "cache-performance",
+      "duration": 98.99970799684525,
+      "timestamp": "2025-07-20T19:35:19.951Z"
+    },
+    "slowestTest": {
+      "label": "memory-usage",
+      "duration": 10732.24941700697,
+      "timestamp": "2025-07-20T19:35:33.002Z"
+    }
+  },
+  "databaseStats": {
+    "operationCount": 141,
+    "cacheSize": 0,
+    "activeListeners": 0
+  },
+  "assertions": [
+    {
+      "name": "Cache Performance",
+      "condition": true,
+      "message": "Cache operations should complete under 1 second",
+      "passed": true
+    },
+    {
+      "name": "Query Optimization",
+      "condition": true,
+      "message": "Optimized queries should complete under 3 seconds",
+      "passed": true
+    },
+    {
+      "name": "Listener Performance",
+      "condition": true,
+      "message": "Listener setup should complete under 2 seconds",
+      "passed": true
+    },
+    {
+      "name": "Concurrent Operations",
+      "condition": true,
+      "message": "Concurrent operations should complete under 5 seconds",
+      "passed": true
+    },
+    {
+      "name": "Memory Usage",
+      "condition": false,
+      "message": "Memory operations should complete under 2 seconds",
+      "passed": false
+    }
+  ],
+  "score": "4/5",
+  "recommendations": "See console output for specific recommendations"
+}

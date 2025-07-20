@@ -106,7 +106,7 @@ export interface TeamMember {
 export interface Notification {
   id: string;
   userId: string;
-  type: 'team_invitation' | 'task_assignment' | 'task_completed' | 'task_overdue';
+  type: 'team_invitation' | 'task_assignment' | 'task_completed' | 'task_overdue' | 'meeting_assignment' | 'meeting_update';
   title: string;
   message: string;
   data: NotificationData;
@@ -123,6 +123,8 @@ export interface NotificationData {
   inviterName?: string;
   meetingId?: string;
   meetingTitle?: string;
+  inviteeEmail?: string;
+  inviteeDisplayName?: string;
 }
 
 export interface CreateTeamData {
@@ -154,6 +156,32 @@ export interface TaskAssignmentData {
   assigneeName: string;
   meetingTitle: string;
   assignedBy: string;
+}
+
+export interface MeetingAssignmentData {
+  meetingId: string;
+  meetingTitle: string;
+  teamId: string;
+  teamName: string;
+  assignedBy: string;
+  assignedByName: string;
+}
+
+export interface UserProfile {
+  userId: string;
+  email: string;
+  displayName: string;
+  photoURL?: string;
+  preferences: {
+    notifications: {
+      teamInvitations: boolean;
+      meetingAssignments: boolean;
+      taskAssignments: boolean;
+    };
+    theme: 'light' | 'dark' | 'system';
+  };
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 // Mobile-responsive UI type definitions

@@ -7,6 +7,7 @@ import {
   CreateNotificationData, 
   TeamInvitationData, 
   TaskAssignmentData,
+  MeetingAssignmentData,
   Notification 
 } from '../types';
 
@@ -224,6 +225,243 @@ describe('NotificationService', () => {
 
       expect(databaseService.deleteNotification).toHaveBeenCalledWith('notification123');
       expect(result).toBe(true);
+    });
+  });
+
+  describe('sendMeetingAssignment', () => {
+    it('should create meeting assignment notifications for all team members', async () => {
+      const mockTeam = {
+        id: 'team123',
+        name: 'Test Team',
+        description: 'A test team',
+        createdBy: 'user1',
+        members: [
+          {
+            userId: 'user1',
+            email: 'user1@example.com',
+            displayName: 'John Doe',
+            role: 'admin' as const,
+            joinedAt: new Date(),
+            status: 'active' as const,
+          },
+          {
+            userId: 'user2',
+            email: 'user2@example.com',
+            displayName: 'Jane Smith',
+            role: 'member' as const,
+            joinedAt: new Date(),
+            status: 'active' as const,
+          },
+          {
+            userId: 'user3',
+            email: 'user3@example.com',
+            displayName: 'Bob Wilson',
+            role: 'member' as const,
+            joinedAt: new Date(),
+            status: 'active' as const,
+          }
+        ],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      const assignment: MeetingAssignmentData = {
+        meetingId: 'meeting123',
+        meetingTitle: 'Weekly Team Meeting',
+        teamId: 'team123',
+        teamName: 'Test Team',
+        assignedBy: 'user1',
+        assignedByName: 'John Doe',
+      };
+
+      // Mock the team service import
+      vi.doMock('../team-service', () => ({
+        getTeamService: () => ({
+          getTeam: vi.fn().mockResolvedValue(mockTeam),
+        }),
+      }));
+
+      vi.mocked(databaseService.createNotification)
+        .mockResolvedValueOnce('notification1')
+        .mockResolvedValueOnce('notification2');
+
+      const result = await notificationService.sendMeetingAssignment(assignment);
+
+      // Should create notifications for user2 and user3 (not user1 who assigned it)
+      expect(databaseService.createNotification).toHaveBeenCalledTimes(2);
+      expect(databaseService.createNotification).toHaveBeenCalledWith({
+        userId: 'user2',
+        type: 'meeting_assignment',
+        title: 'New Team Meeting',
+        message: 'John Doe assigned a new meeting "Weekly Team Meeting" to team "Test Team"',
+        data: {
+          meetingId: 'meeting123',
+          meetingTitle: 'Weekly Team Meeting',
+          teamId: 'team123',
+          teamName: 'Test Team',
+          inviterName: 'John Doe',
+        }
+      });
+      expect(databaseService.createNotification).toHaveBeenCalledWith({
+        userId: 'user3',
+        type: 'meeting_assignment',
+        title: 'New Team Meeting',
+        message: 'John Doe assigned a new meeting "Weekly Team Meeting" to team "Test Team"',
+        data: {
+          meetingId: 'meeting123',
+          meetingTitle: 'Weekly Team Meeting',
+          teamId: 'team123',
+          teamName: 'Test Team',
+          inviterName: 'John Doe',
+        }
+      });
+      expect(result).toEqual(['notification1', 'notification2']);
+    });
+
+    it('should handle team not found error', async () => {
+      const assignment: MeetingAssignmentData = {
+        meetingId: 'meeting123',
+        meetingTitle: 'Weekly Team Meeting',
+        teamId: 'nonexistent',
+        teamName: 'Test Team',
+        assignedBy: 'user1',
+        assignedByName: 'John Doe',
+      };
+
+      // Mock the team service import
+      vi.doMock('../team-service', () => ({
+        getTeamService: () => ({
+          getTeam: vi.fn().mockResolvedValue(null),
+        }),
+      }));
+
+      await expect(notificationService.sendMeetingAssignment(assignment)).rejects.toThrow(
+        'Failed to send meeting assignment notifications: Team not found'
+      );
+    });
+  });
+
+  describe('sendMeetingUpdate', () => {
+    it('should create meeting update notifications for all team members', async () => {
+      const mockTeam = {
+        id: 'team123',
+        name: 'Test Team',
+        description: 'A test team',
+        createdBy: 'user1',
+        members: [
+          {
+            userId: 'user1',
+            email: 'user1@example.com',
+            displayName: 'John Doe',
+            role: 'admin' as const,
+            joinedAt: new Date(),
+            status: 'active' as const,
+          },
+          {
+            userId: 'user2',
+            email: 'user2@example.com',
+            displayName: 'Jane Smith',
+            role: 'member' as const,
+            joinedAt: new Date(),
+            status: 'active' as const,
+          }
+        ],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      // Mock the team service import
+      vi.doMock('../team-service', () => ({
+        getTeamService: () => ({
+          getTeam: vi.fn().mockResolvedValue(mockTeam),
+        }),
+      }));
+
+      vi.mocked(databaseService.createNotification).mockResolvedValue('notification1');
+
+      const result = await notificationService.sendMeetingUpdate(
+        'meeting123',
+        'Weekly Team Meeting',
+        'team123',
+        'user1',
+        'summary'
+      );
+
+      expect(databaseService.createNotification).toHaveBeenCalledWith({
+        userId: 'user2',
+        type: 'meeting_update',
+        title: 'Meeting Summary Updated',
+        message: 'John Doe updated the summary for meeting "Weekly Team Meeting"',
+        data: {
+          meetingId: 'meeting123',
+          meetingTitle: 'Weekly Team Meeting',
+          teamId: 'team123',
+          teamName: 'Test Team',
+          inviterName: 'John Doe',
+        }
+      });
+      expect(result).toEqual(['notification1']);
+    });
+
+    it('should handle different update types correctly', async () => {
+      const mockTeam = {
+        id: 'team123',
+        name: 'Test Team',
+        description: 'A test team',
+        createdBy: 'user1',
+        members: [
+          {
+            userId: 'user1',
+            email: 'user1@example.com',
+            displayName: 'John Doe',
+            role: 'admin' as const,
+            joinedAt: new Date(),
+            status: 'active' as const,
+          },
+          {
+            userId: 'user2',
+            email: 'user2@example.com',
+            displayName: 'Jane Smith',
+            role: 'member' as const,
+            joinedAt: new Date(),
+            status: 'active' as const,
+          }
+        ],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      // Mock the team service import
+      vi.doMock('../team-service', () => ({
+        getTeamService: () => ({
+          getTeam: vi.fn().mockResolvedValue(mockTeam),
+        }),
+      }));
+
+      vi.mocked(databaseService.createNotification).mockResolvedValue('notification1');
+
+      // Test action_items update type
+      await notificationService.sendMeetingUpdate(
+        'meeting123',
+        'Weekly Team Meeting',
+        'team123',
+        'user1',
+        'action_items'
+      );
+
+      expect(databaseService.createNotification).toHaveBeenCalledWith({
+        userId: 'user2',
+        type: 'meeting_update',
+        title: 'Meeting Action Items Updated',
+        message: 'John Doe updated action items for meeting "Weekly Team Meeting"',
+        data: {
+          meetingId: 'meeting123',
+          meetingTitle: 'Weekly Team Meeting',
+          teamId: 'team123',
+          teamName: 'Test Team',
+          inviterName: 'John Doe',
+        }
+      });
     });
   });
 });

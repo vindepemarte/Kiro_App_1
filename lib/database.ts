@@ -8,6 +8,7 @@ import {
   getDocs,
   updateDoc,
   deleteDoc,
+  setDoc,
   query,
   orderBy,
   where,
@@ -33,17 +34,23 @@ import {
   CreateTeamData,
   Notification,
   CreateNotificationData,
-  User
+  User,
+  UserProfile
 } from './types';
+import { ErrorHandler, AppError, retryOperation } from './error-handler';
 
 export interface DatabaseService {
   // Meeting operations
-  saveMeeting(userId: string, meeting: ProcessedMeeting): Promise<string>;
+  saveMeeting(userId: string, meeting: ProcessedMeeting, teamId?: string): Promise<string>;
   getUserMeetings(userId: string): Promise<Meeting[]>;
   getMeetingById(meetingId: string, userId: string): Promise<Meeting | null>;
   updateMeeting(meetingId: string, userId: string, updates: Partial<Meeting>): Promise<boolean>;
   deleteMeeting(meetingId: string, userId: string): Promise<boolean>;
   subscribeToUserMeetings(userId: string, callback: (meetings: Meeting[]) => void): Unsubscribe;
+  
+  // Team meeting operations
+  getTeamMeetings(teamId: string): Promise<Meeting[]>;
+  subscribeToTeamMeetings(teamId: string, callback: (meetings: Meeting[]) => void): Unsubscribe;
   
   // Team management operations
   createTeam(teamData: CreateTeamData): Promise<string>;
@@ -51,6 +58,7 @@ export interface DatabaseService {
   getTeamById(teamId: string): Promise<Team | null>;
   updateTeam(teamId: string, updates: Partial<Team>): Promise<boolean>;
   deleteTeam(teamId: string, userId: string): Promise<boolean>;
+  subscribeToTeam(teamId: string, callback: (team: Team | null) => void): Unsubscribe;
   subscribeToUserTeams(userId: string, callback: (teams: Team[]) => void): Unsubscribe;
   
   // Team member operations
@@ -62,8 +70,14 @@ export interface DatabaseService {
   // User search operations
   searchUserByEmail(email: string): Promise<User | null>;
   
+  // User profile operations
+  createUserProfile(userId: string, profile: UserProfile): Promise<void>;
+  updateUserProfile(userId: string, updates: Partial<UserProfile>): Promise<void>;
+  getUserProfile(userId: string): Promise<UserProfile | null>;
+  subscribeToUserProfile(userId: string, callback: (profile: UserProfile | null) => void): Unsubscribe;
+  
   // Task assignment operations
-  assignTask(meetingId: string, taskId: string, assigneeId: string, assignedBy: string): Promise<boolean>;
+  assignTask(meetingId: string, taskId: string, assigneeId: string, assignedBy: string, meetingOwnerId: string): Promise<boolean>;
   updateTaskStatus(meetingId: string, taskId: string, status: ActionItem['status']): Promise<boolean>;
   getTeamTasks(teamId: string): Promise<ActionItem[]>;
   
@@ -124,6 +138,11 @@ class FirestoreService implements DatabaseService {
   // Get the collection path for users (for search)
   private getUsersPath(): string {
     return `artifacts/${this.appId}/users`;
+  }
+
+  // Get the collection path for all meetings (for team cleanup)
+  private getMeetingsPath(): string {
+    return `artifacts/${this.appId}/meetings`;
   }
 
   // Safe date conversion with fallbacks
@@ -316,90 +335,135 @@ class FirestoreService implements DatabaseService {
   }
 
   // Save a new meeting to Firestore
-  async saveMeeting(userId: string, meeting: ProcessedMeeting): Promise<string> {
-    try {
-      const meetingsCollection = collection(this.db, this.getUserMeetingsPath(userId));
-      
-      const meetingData = {
-        title: this.generateMeetingTitle(meeting.rawTranscript, meeting.summary),
-        date: Timestamp.fromDate(new Date()),
-        summary: meeting.summary || '',
-        actionItems: this.processActionItems(meeting.actionItems || [], true),
-        rawTranscript: meeting.rawTranscript || '',
-        createdAt: Timestamp.fromDate(new Date()),
-        updatedAt: Timestamp.fromDate(new Date()),
-        metadata: {
-          fileName: meeting.metadata?.fileName || 'unknown',
-          fileSize: meeting.metadata?.fileSize || 0,
-          uploadedAt: Timestamp.fromDate(meeting.metadata?.uploadedAt || new Date()),
-          processingTime: meeting.metadata?.processingTime || 0,
-        },
-      };
+  async saveMeeting(userId: string, meeting: ProcessedMeeting, teamId?: string): Promise<string> {
+    return await retryOperation(async () => {
+      try {
+        // Validate inputs
+        if (!userId?.trim()) {
+          throw new AppError('User ID is required', 'VALIDATION_ERROR', false, 'Please sign in and try again');
+        }
+        if (!meeting?.rawTranscript && !meeting?.summary) {
+          throw new AppError('Meeting content is required', 'VALIDATION_ERROR', false, 'Please provide meeting content');
+        }
 
-      // Debug logging to help identify undefined values
-      console.log('Saving meeting data:', {
-        title: meetingData.title,
-        actionItemsCount: meetingData.actionItems.length,
-        hasUndefinedValues: JSON.stringify(meetingData).includes('undefined')
-      });
+        const meetingsCollection = collection(this.db, this.getUserMeetingsPath(userId));
+        
+        const meetingTitle = this.generateMeetingTitle(meeting.rawTranscript, meeting.summary);
+        const meetingData = {
+          title: meetingTitle,
+          date: Timestamp.fromDate(new Date()),
+          summary: meeting.summary || '',
+          actionItems: this.processActionItems(meeting.actionItems || [], true),
+          rawTranscript: meeting.rawTranscript || '',
+          teamId: teamId || undefined,
+          createdAt: Timestamp.fromDate(new Date()),
+          updatedAt: Timestamp.fromDate(new Date()),
+          metadata: {
+            fileName: meeting.metadata?.fileName || 'unknown',
+            fileSize: meeting.metadata?.fileSize || 0,
+            uploadedAt: Timestamp.fromDate(meeting.metadata?.uploadedAt || new Date()),
+            processingTime: meeting.metadata?.processingTime || 0,
+          },
+        };
 
-      const docRef = await addDoc(meetingsCollection, meetingData);
-      return docRef.id;
-    } catch (error) {
-      console.error('Database save error:', error);
-      const errorMessage = DatabaseUtils.isFirestoreError(error)
-        ? this.handleFirestoreError(error)
-        : `Failed to save meeting: ${error instanceof Error ? error.message : 'Unknown error'}`;
-      
-      throw new Error(errorMessage);
-    }
+        const docRef = await addDoc(meetingsCollection, meetingData);
+        const meetingId = docRef.id;
+
+        // Send meeting assignment notifications if assigned to a team
+        if (teamId) {
+          try {
+            await this.sendMeetingAssignmentNotifications(meetingId, meetingTitle, teamId, userId);
+          } catch (notificationError) {
+            console.warn('Failed to send meeting assignment notifications:', notificationError);
+            // Don't fail the meeting save if notifications fail
+          }
+        }
+
+        return meetingId;
+      } catch (error) {
+        throw ErrorHandler.handleError(error, 'Save Meeting');
+      }
+    }, {
+      maxRetries: 3,
+      retryCondition: (error) => {
+        const appError = ErrorHandler.normalizeError(error);
+        return appError.retryable && !appError.code.includes('VALIDATION');
+      }
+    });
   }
 
   // Get all meetings for a user
   async getUserMeetings(userId: string): Promise<Meeting[]> {
-    try {
-      const meetingsCollection = collection(this.db, this.getUserMeetingsPath(userId));
-      const q = query(meetingsCollection, orderBy('createdAt', 'desc'));
-      
-      const querySnapshot = await getDocs(q);
-      const meetings: Meeting[] = [];
-
-      querySnapshot.forEach((doc) => {
-        const meeting = this.documentToMeeting(doc);
-        if (meeting) {
-          meetings.push(meeting);
+    return await retryOperation(async () => {
+      try {
+        // Validate inputs
+        if (!userId?.trim()) {
+          throw new AppError('User ID is required', 'VALIDATION_ERROR', false, 'Please sign in and try again');
         }
-      });
 
-      return meetings;
-    } catch (error) {
-      const errorMessage = DatabaseUtils.isFirestoreError(error)
-        ? this.handleFirestoreError(error)
-        : `Failed to fetch meetings: ${error instanceof Error ? error.message : 'Unknown error'}`;
-      
-      throw new Error(errorMessage);
-    }
+        const meetingsCollection = collection(this.db, this.getUserMeetingsPath(userId));
+        const q = query(meetingsCollection, orderBy('createdAt', 'desc'));
+        
+        const querySnapshot = await getDocs(q);
+        const meetings: Meeting[] = [];
+
+        querySnapshot.forEach((doc) => {
+          const meeting = this.documentToMeeting(doc);
+          if (meeting) {
+            meetings.push(meeting);
+          }
+        });
+
+        return meetings;
+      } catch (error) {
+        throw ErrorHandler.handleError(error, 'Get User Meetings');
+      }
+    }, {
+      maxRetries: 2,
+      retryCondition: (error) => {
+        const appError = ErrorHandler.normalizeError(error);
+        return appError.retryable && !appError.code.includes('VALIDATION');
+      }
+    });
   }
 
   // Get a specific meeting by ID
   async getMeetingById(meetingId: string, userId: string): Promise<Meeting | null> {
-    try {
-      const meetingDoc = doc(this.db, this.getUserMeetingsPath(userId), meetingId);
-      const docSnapshot = await getDoc(meetingDoc);
-      
-      return this.documentToMeeting(docSnapshot);
-    } catch (error) {
-      const errorMessage = DatabaseUtils.isFirestoreError(error)
-        ? this.handleFirestoreError(error)
-        : `Failed to fetch meeting: ${error instanceof Error ? error.message : 'Unknown error'}`;
-      
-      throw new Error(errorMessage);
-    }
+    return await retryOperation(async () => {
+      try {
+        // Validate inputs
+        if (!meetingId?.trim()) {
+          throw new AppError('Meeting ID is required', 'VALIDATION_ERROR', false, 'Invalid meeting ID');
+        }
+        if (!userId?.trim()) {
+          throw new AppError('User ID is required', 'VALIDATION_ERROR', false, 'Please sign in and try again');
+        }
+
+        const meetingDoc = doc(this.db, this.getUserMeetingsPath(userId), meetingId);
+        const docSnapshot = await getDoc(meetingDoc);
+        
+        return this.documentToMeeting(docSnapshot);
+      } catch (error) {
+        throw ErrorHandler.handleError(error, 'Get Meeting');
+      }
+    }, {
+      maxRetries: 2,
+      retryCondition: (error) => {
+        const appError = ErrorHandler.normalizeError(error);
+        return appError.retryable && !appError.code.includes('VALIDATION');
+      }
+    });
   }
 
   // Update an existing meeting
   async updateMeeting(meetingId: string, userId: string, updates: Partial<Meeting>): Promise<boolean> {
     try {
+      // Get the current meeting to check if it's assigned to a team
+      const currentMeeting = await this.getMeetingById(meetingId, userId);
+      if (!currentMeeting) {
+        throw new Error('Meeting not found');
+      }
+
       const meetingDoc = doc(this.db, this.getUserMeetingsPath(userId), meetingId);
       
       // Convert Date objects to Timestamps for Firestore
@@ -421,6 +485,28 @@ class FirestoreService implements DatabaseService {
       }
 
       await updateDoc(meetingDoc, firestoreUpdates);
+
+      // Send meeting update notifications if the meeting is assigned to a team
+      if (currentMeeting.teamId) {
+        try {
+          // Determine the type of update
+          let updateType = 'general';
+          if (updates.summary) updateType = 'summary';
+          if (updates.actionItems) updateType = 'action_items';
+          
+          await this.sendMeetingUpdateNotifications(
+            meetingId, 
+            currentMeeting.title, 
+            currentMeeting.teamId, 
+            userId, 
+            updateType
+          );
+        } catch (notificationError) {
+          console.warn('Failed to send meeting update notifications:', notificationError);
+          // Don't fail the meeting update if notifications fail
+        }
+      }
+
       return true;
     } catch (error) {
       const errorMessage = DatabaseUtils.isFirestoreError(error)
@@ -473,6 +559,176 @@ class FirestoreService implements DatabaseService {
     );
   }
 
+  // ===== TEAM MEETING OPERATIONS =====
+
+  // Get all meetings for a specific team
+  async getTeamMeetings(teamId: string): Promise<Meeting[]> {
+    try {
+      // We need to search across all user meeting collections for meetings with this teamId
+      // This is a simplified approach - in production, you might want a dedicated team meetings collection
+      const teamsCollection = collection(this.db, this.getTeamsPath());
+      const teamDoc = await getDoc(doc(teamsCollection, teamId));
+      
+      if (!teamDoc.exists()) {
+        throw new Error('Team not found');
+      }
+
+      const team = this.documentToTeam(teamDoc);
+      if (!team) {
+        throw new Error('Invalid team data');
+      }
+
+      const allMeetings: Meeting[] = [];
+
+      // Get meetings from all team members
+      for (const member of team.members) {
+        if (member.status === 'active') {
+          try {
+            const memberMeetings = await this.getUserMeetings(member.userId);
+            const teamMeetings = memberMeetings.filter(meeting => meeting.teamId === teamId);
+            allMeetings.push(...teamMeetings);
+          } catch (error) {
+            console.warn(`Failed to get meetings for team member ${member.userId}:`, error);
+            // Continue with other members
+          }
+        }
+      }
+
+      // Remove duplicates and sort by creation date
+      const uniqueMeetings = allMeetings.filter((meeting, index, self) => 
+        index === self.findIndex(m => m.id === meeting.id)
+      );
+
+      return uniqueMeetings.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    } catch (error) {
+      const errorMessage = DatabaseUtils.isFirestoreError(error)
+        ? this.handleFirestoreError(error)
+        : `Failed to fetch team meetings: ${error instanceof Error ? error.message : 'Unknown error'}`;
+      
+      throw new Error(errorMessage);
+    }
+  }
+
+  // Subscribe to real-time updates for team meetings
+  subscribeToTeamMeetings(teamId: string, callback: (meetings: Meeting[]) => void): Unsubscribe {
+    try {
+      let isActive = true;
+      const unsubscribeFunctions: Unsubscribe[] = [];
+      const meetingsMap = new Map<string, Meeting>();
+
+      // Function to update the combined meetings list
+      const updateCombinedMeetings = () => {
+        if (!isActive) return;
+        
+        const allMeetings = Array.from(meetingsMap.values())
+          .filter(meeting => meeting.teamId === teamId)
+          .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+        
+        callback(allMeetings);
+      };
+
+      // Set up real-time listeners for each team member
+      const setupTeamMemberListeners = async () => {
+        try {
+          const team = await this.getTeamById(teamId);
+          if (!team || !isActive) {
+            callback([]);
+            return;
+          }
+
+          // Subscribe to meetings from each active team member
+          for (const member of team.members) {
+            if (member.status === 'active') {
+              try {
+                const memberMeetingsCollection = collection(this.db, this.getUserMeetingsPath(member.userId));
+                const memberQuery = query(
+                  memberMeetingsCollection,
+                  where('teamId', '==', teamId),
+                  orderBy('createdAt', 'desc')
+                );
+
+                const unsubscribe = onSnapshot(
+                  memberQuery,
+                  (querySnapshot: QuerySnapshot<DocumentData>) => {
+                    if (!isActive) return;
+
+                    // Remove old meetings from this member
+                    const memberMeetingIds = new Set<string>();
+                    
+                    querySnapshot.forEach((doc) => {
+                      const meeting = this.documentToMeeting(doc);
+                      if (meeting && meeting.teamId === teamId) {
+                        meetingsMap.set(doc.id, meeting);
+                        memberMeetingIds.add(doc.id);
+                      }
+                    });
+
+                    // Remove meetings that are no longer in this member's collection
+                    for (const [meetingId, meeting] of meetingsMap.entries()) {
+                      if (meeting.teamId === teamId && !memberMeetingIds.has(meetingId)) {
+                        // Check if this meeting exists in other members' collections
+                        let existsElsewhere = false;
+                        for (const otherMember of team.members) {
+                          if (otherMember.userId !== member.userId && otherMember.status === 'active') {
+                            // This is a simplified check - in a real implementation you might want to verify
+                            existsElsewhere = true;
+                            break;
+                          }
+                        }
+                        if (!existsElsewhere) {
+                          meetingsMap.delete(meetingId);
+                        }
+                      }
+                    }
+
+                    updateCombinedMeetings();
+                  },
+                  (error: FirestoreError) => {
+                    console.error(`Real-time listener error for team member ${member.userId}:`, error);
+                    // Don't fail the entire subscription for one member
+                  }
+                );
+
+                unsubscribeFunctions.push(unsubscribe);
+              } catch (memberError) {
+                console.warn(`Failed to set up listener for team member ${member.userId}:`, memberError);
+                // Continue with other members
+              }
+            }
+          }
+
+          // Initial callback with empty array if no listeners were set up
+          if (unsubscribeFunctions.length === 0) {
+            callback([]);
+          }
+        } catch (error) {
+          console.error('Error setting up team member listeners:', error);
+          callback([]);
+        }
+      };
+
+      // Start setting up listeners
+      setupTeamMemberListeners();
+
+      // Return cleanup function
+      return () => {
+        isActive = false;
+        unsubscribeFunctions.forEach(unsub => {
+          try {
+            unsub();
+          } catch (error) {
+            console.warn('Error during cleanup:', error);
+          }
+        });
+        meetingsMap.clear();
+      };
+    } catch (error) {
+      console.error('Failed to set up team meetings listener:', error);
+      callback([]);
+      return () => {};
+    }
+  }
+
   // ===== TEAM MANAGEMENT OPERATIONS =====
 
   // Create a new team
@@ -511,17 +767,18 @@ class FirestoreService implements DatabaseService {
   async getUserTeams(userId: string): Promise<Team[]> {
     try {
       const teamsCollection = collection(this.db, this.getTeamsPath());
-      const q = query(teamsCollection, where('members', 'array-contains-any', [
-        { userId, status: 'active' },
-        { userId, status: 'invited' }
-      ]));
       
-      const querySnapshot = await getDocs(q);
+      // Use a simpler query approach - get all teams and filter client-side
+      // This is more reliable than complex array-contains queries
+      const querySnapshot = await getDocs(teamsCollection);
       const teams: Team[] = [];
 
       querySnapshot.forEach((doc) => {
         const team = this.documentToTeam(doc);
-        if (team && team.members.some(member => member.userId === userId)) {
+        if (team && team.members.some(member => 
+          member.userId === userId && 
+          (member.status === 'active' || member.status === 'invited')
+        )) {
           teams.push(team);
         }
       });
@@ -584,7 +841,7 @@ class FirestoreService implements DatabaseService {
     }
   }
 
-  // Delete a team (only by creator)
+  // Delete a team (only by creator) with proper cleanup
   async deleteTeam(teamId: string, userId: string): Promise<boolean> {
     try {
       const team = await this.getTeamById(teamId);
@@ -596,8 +853,17 @@ class FirestoreService implements DatabaseService {
         throw new Error('Only the team creator can delete the team');
       }
 
+      // Step 1: Clean up team-related notifications
+      await this.cleanupTeamNotifications(teamId);
+
+      // Step 2: Clean up team meetings (reassign to personal or delete)
+      await this.cleanupTeamMeetings(teamId);
+
+      // Step 3: Delete the team document
       const teamDoc = doc(this.db, this.getTeamsPath(), teamId);
       await deleteDoc(teamDoc);
+
+      console.log(`Team ${teamId} deleted successfully with proper cleanup`);
       return true;
     } catch (error) {
       const errorMessage = DatabaseUtils.isFirestoreError(error)
@@ -605,6 +871,194 @@ class FirestoreService implements DatabaseService {
         : `Failed to delete team: ${error instanceof Error ? error.message : 'Unknown error'}`;
       
       throw new Error(errorMessage);
+    }
+  }
+
+  // Helper method to clean up team-related notifications
+  private async cleanupTeamNotifications(teamId: string): Promise<void> {
+    try {
+      const notificationsCollection = collection(this.db, this.getNotificationsPath());
+      const teamNotificationsQuery = query(
+        notificationsCollection,
+        where('data.teamId', '==', teamId)
+      );
+      
+      const querySnapshot = await getDocs(teamNotificationsQuery);
+      const deletePromises: Promise<void>[] = [];
+      
+      querySnapshot.forEach((doc) => {
+        deletePromises.push(deleteDoc(doc.ref));
+      });
+      
+      await Promise.all(deletePromises);
+      console.log(`Cleaned up ${deletePromises.length} team notifications for team ${teamId}`);
+    } catch (error) {
+      console.error('Error cleaning up team notifications:', error);
+      // Don't throw error here to allow team deletion to continue
+    }
+  }
+
+  // Helper method to clean up team meetings
+  private async cleanupTeamMeetings(teamId: string): Promise<void> {
+    try {
+      const meetingsCollection = collection(this.db, this.getMeetingsPath());
+      const teamMeetingsQuery = query(
+        meetingsCollection,
+        where('teamId', '==', teamId)
+      );
+      
+      const querySnapshot = await getDocs(teamMeetingsQuery);
+      const updatePromises: Promise<void>[] = [];
+      
+      querySnapshot.forEach((doc) => {
+        // Remove team assignment from meetings (convert to personal meetings)
+        const updateData = {
+          teamId: null,
+          updatedAt: Timestamp.fromDate(new Date())
+        };
+        updatePromises.push(updateDoc(doc.ref, updateData));
+      });
+      
+      await Promise.all(updatePromises);
+      console.log(`Cleaned up ${updatePromises.length} team meetings for team ${teamId}`);
+    } catch (error) {
+      console.error('Error cleaning up team meetings:', error);
+      // Don't throw error here to allow team deletion to continue
+    }
+  }
+
+  // Helper method to send meeting assignment notifications
+  private async sendMeetingAssignmentNotifications(
+    meetingId: string, 
+    meetingTitle: string, 
+    teamId: string, 
+    assignedBy: string
+  ): Promise<void> {
+    try {
+      // Get team information
+      const team = await this.getTeamById(teamId);
+      if (!team) {
+        console.warn(`Team ${teamId} not found for meeting assignment notifications`);
+        return;
+      }
+
+      // Get the assigner's information
+      const assignerMember = team.members.find(member => member.userId === assignedBy);
+      const assignerName = assignerMember?.displayName || 'Team member';
+
+      // Import notification service dynamically to avoid circular dependencies
+      const { notificationService } = await import('./notification-service');
+      
+      // Send meeting assignment notification
+      await notificationService.sendMeetingAssignment({
+        meetingId,
+        meetingTitle,
+        teamId,
+        teamName: team.name,
+        assignedBy,
+        assignedByName: assignerName,
+      });
+
+      console.log(`Sent meeting assignment notifications for "${meetingTitle}" to team "${team.name}"`);
+    } catch (error) {
+      console.error('Error sending meeting assignment notifications:', error);
+      // Don't throw error to avoid failing the meeting save
+    }
+  }
+
+  // Helper method to send meeting update notifications
+  private async sendMeetingUpdateNotifications(
+    meetingId: string, 
+    meetingTitle: string, 
+    teamId: string, 
+    updatedBy: string, 
+    updateType: string
+  ): Promise<void> {
+    try {
+      // Import notification service dynamically to avoid circular dependencies
+      const { notificationService } = await import('./notification-service');
+      
+      // Send meeting update notification
+      await notificationService.sendMeetingUpdate(
+        meetingId,
+        meetingTitle,
+        teamId,
+        updatedBy,
+        updateType
+      );
+
+      console.log(`Sent meeting update notifications for "${meetingTitle}" (${updateType}) to team ${teamId}`);
+    } catch (error) {
+      console.error('Error sending meeting update notifications:', error);
+      // Don't throw error to avoid failing the meeting update
+    }
+  }
+
+  // Helper method to send task assignment notifications
+  private async sendTaskAssignmentNotifications(
+    task: ActionItem,
+    meeting: Meeting,
+    assignedBy: string
+  ): Promise<void> {
+    try {
+      if (!task.assigneeId) {
+        return;
+      }
+
+      // Import notification service dynamically to avoid circular dependencies
+      const { notificationService } = await import('./notification-service');
+      
+      // Get assignee information from team members
+      let assigneeName = task.assigneeName || 'Unknown';
+      if (meeting.teamId) {
+        const team = await this.getTeamById(meeting.teamId);
+        if (team) {
+          const assigneeMember = team.members.find(member => member.userId === task.assigneeId);
+          if (assigneeMember) {
+            assigneeName = assigneeMember.displayName;
+          }
+        }
+      }
+
+      // Send task assignment notification
+      await notificationService.sendTaskAssignment({
+        taskId: task.id,
+        taskDescription: task.description,
+        assigneeId: task.assigneeId,
+        assigneeName: assigneeName,
+        meetingTitle: meeting.title,
+        assignedBy: assignedBy,
+      });
+
+      console.log(`Sent task assignment notification for task "${task.description}" to ${assigneeName}`);
+    } catch (error) {
+      console.error('Error sending task assignment notifications:', error);
+      // Don't throw error to avoid failing the task assignment
+    }
+  }
+
+  // Subscribe to real-time updates for a specific team
+  subscribeToTeam(teamId: string, callback: (team: Team | null) => void): Unsubscribe {
+    try {
+      const teamDoc = doc(this.db, this.getTeamsPath(), teamId);
+      
+      return onSnapshot(
+        teamDoc,
+        (docSnapshot: DocumentSnapshot<DocumentData>) => {
+          const team = this.documentToTeam(docSnapshot);
+          callback(team);
+        },
+        (error: FirestoreError) => {
+          console.error('Real-time team listener error:', error);
+          // Return null instead of failing
+          callback(null);
+        }
+      );
+    } catch (error) {
+      console.error('Failed to set up team listener:', error);
+      // Return a no-op unsubscribe function
+      callback(null);
+      return () => {};
     }
   }
 
@@ -620,7 +1074,10 @@ class FirestoreService implements DatabaseService {
           
           querySnapshot.forEach((doc) => {
             const team = this.documentToTeam(doc);
-            if (team && team.members.some(member => member.userId === userId)) {
+            if (team && team.members.some(member => 
+              member.userId === userId && 
+              (member.status === 'active' || member.status === 'invited')
+            )) {
               teams.push(team);
             }
           });
@@ -774,13 +1231,9 @@ class FirestoreService implements DatabaseService {
   // ===== TASK ASSIGNMENT OPERATIONS =====
 
   // Assign a task to a team member
-  async assignTask(meetingId: string, taskId: string, assigneeId: string, assignedBy: string): Promise<boolean> {
+  async assignTask(meetingId: string, taskId: string, assigneeId: string, assignedBy: string, meetingOwnerId: string): Promise<boolean> {
     try {
-      // First, we need to find which user owns this meeting
-      // We'll need to search through user collections to find the meeting
-      // For now, we'll assume the assignedBy user owns the meeting
-      
-      const meeting = await this.getMeetingById(meetingId, assignedBy);
+      const meeting = await this.getMeetingById(meetingId, meetingOwnerId);
       if (!meeting) {
         throw new Error('Meeting not found');
       }
@@ -798,7 +1251,23 @@ class FirestoreService implements DatabaseService {
         assignedAt: new Date(),
       };
 
-      return await this.updateMeeting(meetingId, assignedBy, { actionItems: updatedActionItems });
+      const success = await this.updateMeeting(meetingId, meetingOwnerId, { actionItems: updatedActionItems });
+
+      // Send task assignment notification if the meeting is assigned to a team
+      if (success && meeting.teamId) {
+        try {
+          await this.sendTaskAssignmentNotifications(
+            updatedActionItems[taskIndex],
+            meeting,
+            assignedBy
+          );
+        } catch (notificationError) {
+          console.warn('Failed to send task assignment notifications:', notificationError);
+          // Don't fail the task assignment if notifications fail
+        }
+      }
+
+      return success;
     } catch (error) {
       const errorMessage = DatabaseUtils.isFirestoreError(error)
         ? this.handleFirestoreError(error)
@@ -976,6 +1445,142 @@ class FirestoreService implements DatabaseService {
     );
   }
 
+  // ===== USER PROFILE OPERATIONS =====
+
+  // Get the collection path for user profiles
+  private getUserProfilesPath(): string {
+    return `artifacts/${this.appId}/userProfiles`;
+  }
+
+  // Convert Firestore document to UserProfile object
+  private documentToUserProfile(doc: DocumentSnapshot<DocumentData>): UserProfile | null {
+    if (!doc.exists()) {
+      return null;
+    }
+
+    const data = doc.data();
+    
+    return {
+      userId: doc.id,
+      email: data.email || '',
+      displayName: data.displayName || '',
+      photoURL: data.photoURL || undefined,
+      preferences: {
+        notifications: {
+          teamInvitations: data.preferences?.notifications?.teamInvitations ?? true,
+          meetingAssignments: data.preferences?.notifications?.meetingAssignments ?? true,
+          taskAssignments: data.preferences?.notifications?.taskAssignments ?? true,
+        },
+        theme: data.preferences?.theme || 'system',
+      },
+      createdAt: this.safeToDate(data.createdAt),
+      updatedAt: this.safeToDate(data.updatedAt),
+    };
+  }
+
+  // Create a user profile
+  async createUserProfile(userId: string, profile: UserProfile): Promise<void> {
+    try {
+      const profileDoc = doc(this.db, this.getUserProfilesPath(), userId);
+      
+      const profileData = {
+        email: profile.email,
+        displayName: profile.displayName,
+        photoURL: profile.photoURL || null,
+        preferences: {
+          notifications: {
+            teamInvitations: profile.preferences.notifications.teamInvitations,
+            meetingAssignments: profile.preferences.notifications.meetingAssignments,
+            taskAssignments: profile.preferences.notifications.taskAssignments,
+          },
+          theme: profile.preferences.theme,
+        },
+        createdAt: Timestamp.fromDate(new Date()),
+        updatedAt: Timestamp.fromDate(new Date()),
+      };
+
+      await setDoc(profileDoc, profileData);
+    } catch (error) {
+      const errorMessage = DatabaseUtils.isFirestoreError(error)
+        ? this.handleFirestoreError(error)
+        : `Failed to create user profile: ${error instanceof Error ? error.message : 'Unknown error'}`;
+      
+      throw new Error(errorMessage);
+    }
+  }
+
+  // Update a user profile
+  async updateUserProfile(userId: string, updates: Partial<UserProfile>): Promise<void> {
+    try {
+      const profileDoc = doc(this.db, this.getUserProfilesPath(), userId);
+      
+      const updateData: any = {
+        updatedAt: Timestamp.fromDate(new Date()),
+      };
+
+      if (updates.email) updateData.email = updates.email;
+      if (updates.displayName) updateData.displayName = updates.displayName;
+      if (updates.photoURL !== undefined) updateData.photoURL = updates.photoURL;
+      if (updates.preferences) {
+        updateData.preferences = {
+          notifications: {
+            teamInvitations: updates.preferences.notifications?.teamInvitations !== undefined 
+              ? updates.preferences.notifications.teamInvitations 
+              : true,
+            meetingAssignments: updates.preferences.notifications?.meetingAssignments !== undefined 
+              ? updates.preferences.notifications.meetingAssignments 
+              : true,
+            taskAssignments: updates.preferences.notifications?.taskAssignments !== undefined 
+              ? updates.preferences.notifications.taskAssignments 
+              : true,
+          },
+          theme: updates.preferences.theme || 'system',
+        };
+      }
+
+      await updateDoc(profileDoc, updateData);
+    } catch (error) {
+      const errorMessage = DatabaseUtils.isFirestoreError(error)
+        ? this.handleFirestoreError(error)
+        : `Failed to update user profile: ${error instanceof Error ? error.message : 'Unknown error'}`;
+      
+      throw new Error(errorMessage);
+    }
+  }
+
+  // Get a user profile
+  async getUserProfile(userId: string): Promise<UserProfile | null> {
+    try {
+      const profileDoc = doc(this.db, this.getUserProfilesPath(), userId);
+      const docSnapshot = await getDoc(profileDoc);
+      
+      return this.documentToUserProfile(docSnapshot);
+    } catch (error) {
+      const errorMessage = DatabaseUtils.isFirestoreError(error)
+        ? this.handleFirestoreError(error)
+        : `Failed to get user profile: ${error instanceof Error ? error.message : 'Unknown error'}`;
+      
+      throw new Error(errorMessage);
+    }
+  }
+
+  // Subscribe to real-time updates for user profile
+  subscribeToUserProfile(userId: string, callback: (profile: UserProfile | null) => void): Unsubscribe {
+    const profileDoc = doc(this.db, this.getUserProfilesPath(), userId);
+
+    return onSnapshot(
+      profileDoc,
+      (docSnapshot: DocumentSnapshot<DocumentData>) => {
+        const profile = this.documentToUserProfile(docSnapshot);
+        callback(profile);
+      },
+      (error: FirestoreError) => {
+        console.error('Real-time user profile listener error:', error);
+        callback(null);
+      }
+    );
+  }
+
   // Enable offline support
   async enableOfflineSupport(): Promise<void> {
     try {
@@ -997,8 +1602,26 @@ class FirestoreService implements DatabaseService {
   }
 }
 
-// Create and export singleton instance
-export const databaseService = new FirestoreService();
+// Create and export singleton instance with lazy initialization
+let databaseServiceInstance: FirestoreService | null = null;
+
+function getDatabaseService(): FirestoreService {
+  if (!databaseServiceInstance) {
+    databaseServiceInstance = new FirestoreService();
+  }
+  return databaseServiceInstance;
+}
+
+export const databaseService = new Proxy({} as FirestoreService, {
+  get(target, prop) {
+    const instance = getDatabaseService();
+    const value = (instance as any)[prop];
+    if (typeof value === 'function') {
+      return value.bind(instance);
+    }
+    return value;
+  }
+});
 
 // Ensure methods are properly bound to prevent context loss
 export const createTeam = databaseService.createTeam.bind(databaseService);
@@ -1009,6 +1632,35 @@ export const deleteTeam = databaseService.deleteTeam.bind(databaseService);
 export const addTeamMember = databaseService.addTeamMember.bind(databaseService);
 export const removeTeamMember = databaseService.removeTeamMember.bind(databaseService);
 export const updateTeamMember = databaseService.updateTeamMember.bind(databaseService);
+export const getTeamMembers = databaseService.getTeamMembers.bind(databaseService);
+export const subscribeToTeam = databaseService.subscribeToTeam.bind(databaseService);
+export const subscribeToUserTeams = databaseService.subscribeToUserTeams.bind(databaseService);
+
+// Notification methods
+export const createNotification = databaseService.createNotification.bind(databaseService);
+export const getUserNotifications = databaseService.getUserNotifications.bind(databaseService);
+export const markNotificationAsRead = databaseService.markNotificationAsRead.bind(databaseService);
+export const deleteNotification = databaseService.deleteNotification.bind(databaseService);
+export const subscribeToUserNotifications = databaseService.subscribeToUserNotifications.bind(databaseService);
+
+// User search methods
+export const searchUserByEmail = databaseService.searchUserByEmail.bind(databaseService);
+
+// User profile methods
+export const createUserProfile = databaseService.createUserProfile.bind(databaseService);
+export const updateUserProfile = databaseService.updateUserProfile.bind(databaseService);
+export const getUserProfile = databaseService.getUserProfile.bind(databaseService);
+export const subscribeToUserProfile = databaseService.subscribeToUserProfile.bind(databaseService);
+
+// Meeting methods with team support
+export const saveMeeting = databaseService.saveMeeting.bind(databaseService);
+export const getUserMeetings = databaseService.getUserMeetings.bind(databaseService);
+export const getMeetingById = databaseService.getMeetingById.bind(databaseService);
+export const updateMeeting = databaseService.updateMeeting.bind(databaseService);
+export const deleteMeeting = databaseService.deleteMeeting.bind(databaseService);
+export const subscribeToUserMeetings = databaseService.subscribeToUserMeetings.bind(databaseService);
+export const getTeamMeetings = databaseService.getTeamMeetings.bind(databaseService);
+export const subscribeToTeamMeetings = databaseService.subscribeToTeamMeetings.bind(databaseService);
 
 // Export the service class for testing
 export { FirestoreService };

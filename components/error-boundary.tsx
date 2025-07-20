@@ -4,13 +4,16 @@ import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { AlertCircle, RefreshCw, Home, Bug, Copy, Check } from 'lucide-react';
+import { AlertCircle, RefreshCw, Home, Bug, Copy, Check, Shield, Wifi, WifiOff } from 'lucide-react';
+import { ErrorState, RetryButton, ConnectionStatus } from '@/components/ui/loading-states';
 
 interface Props {
   children: ReactNode;
   fallback?: ReactNode;
   onError?: (error: Error, errorInfo: ErrorInfo) => void;
   showErrorDetails?: boolean;
+  enableAutoRecovery?: boolean;
+  recoveryStrategies?: RecoveryStrategy[];
 }
 
 interface State {
@@ -19,19 +22,48 @@ interface State {
   errorInfo?: ErrorInfo;
   retryCount: number;
   copied: boolean;
+  isOnline: boolean;
+  autoRecoveryAttempted: boolean;
+  recoveryInProgress: boolean;
+}
+
+interface RecoveryStrategy {
+  name: string;
+  description: string;
+  action: () => Promise<boolean>;
+  condition?: (error: Error) => boolean;
 }
 
 export class ErrorBoundary extends Component<Props, State> {
   private maxRetries = 3;
+  private autoRecoveryTimer?: NodeJS.Timeout;
 
   public state: State = {
     hasError: false,
     retryCount: 0,
     copied: false,
+    isOnline: typeof window !== 'undefined' && typeof navigator !== 'undefined' ? navigator.onLine : true,
+    autoRecoveryAttempted: false,
+    recoveryInProgress: false,
   };
 
   public static getDerivedStateFromError(error: Error): Partial<State> {
     return { hasError: true, error };
+  }
+
+  public componentDidMount() {
+    // Listen for online/offline events
+    window.addEventListener('online', this.handleOnlineStatusChange);
+    window.addEventListener('offline', this.handleOnlineStatusChange);
+  }
+
+  public componentWillUnmount() {
+    window.removeEventListener('online', this.handleOnlineStatusChange);
+    window.removeEventListener('offline', this.handleOnlineStatusChange);
+    
+    if (this.autoRecoveryTimer) {
+      clearTimeout(this.autoRecoveryTimer);
+    }
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
@@ -46,7 +78,108 @@ export class ErrorBoundary extends Component<Props, State> {
 
     // Log error details for debugging
     this.logError(error, errorInfo);
+
+    // Attempt auto-recovery if enabled
+    if (this.props.enableAutoRecovery && !this.state.autoRecoveryAttempted) {
+      this.attemptAutoRecovery(error);
+    }
   }
+
+  private handleOnlineStatusChange = () => {
+    if (typeof navigator !== 'undefined') {
+      this.setState({ isOnline: navigator.onLine });
+      
+      // If we're back online and had a network error, try auto-recovery
+      if (navigator.onLine && this.state.hasError && this.state.error) {
+        const errorMessage = this.state.error.message.toLowerCase();
+        if (errorMessage.includes('network') || errorMessage.includes('fetch')) {
+          this.attemptAutoRecovery(this.state.error);
+        }
+      }
+    }
+  };
+
+  private attemptAutoRecovery = async (error: Error) => {
+    if (this.state.autoRecoveryAttempted || this.state.recoveryInProgress) return;
+
+    this.setState({ recoveryInProgress: true, autoRecoveryAttempted: true });
+
+    try {
+      // Try default recovery strategies first
+      const recovered = await this.tryDefaultRecoveryStrategies(error);
+      
+      if (!recovered && this.props.recoveryStrategies) {
+        // Try custom recovery strategies
+        for (const strategy of this.props.recoveryStrategies) {
+          if (!strategy.condition || strategy.condition(error)) {
+            console.log(`Attempting recovery strategy: ${strategy.name}`);
+            const success = await strategy.action();
+            if (success) {
+              console.log(`Recovery strategy ${strategy.name} succeeded`);
+              this.handleRetry();
+              return;
+            }
+          }
+        }
+      } else if (recovered) {
+        this.handleRetry();
+        return;
+      }
+    } catch (recoveryError) {
+      console.error('Auto-recovery failed:', recoveryError);
+    } finally {
+      this.setState({ recoveryInProgress: false });
+    }
+  };
+
+  private tryDefaultRecoveryStrategies = async (error: Error): Promise<boolean> => {
+    const errorMessage = error.message.toLowerCase();
+
+    // Network error recovery
+    if (errorMessage.includes('network') || errorMessage.includes('fetch')) {
+      // Wait for network to be available
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        return false; // Will retry when online event fires
+      }
+      
+      // Simple network test
+      try {
+        await fetch('/api/health', { method: 'HEAD' });
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    // Auth error recovery
+    if (errorMessage.includes('auth') || errorMessage.includes('permission')) {
+      // Check if user is still authenticated
+      try {
+        const response = await fetch('/api/auth/check', { method: 'HEAD' });
+        return response.ok;
+      } catch {
+        return false;
+      }
+    }
+
+    // Memory/resource error recovery
+    if (errorMessage.includes('memory') || errorMessage.includes('quota')) {
+      // Clear some caches
+      if ('caches' in window) {
+        try {
+          const cacheNames = await caches.keys();
+          await Promise.all(
+            cacheNames.map(name => caches.delete(name))
+          );
+          return true;
+        } catch {
+          return false;
+        }
+      }
+    }
+
+    return false;
+  };
 
   private logError = (error: Error, errorInfo: ErrorInfo) => {
     const errorDetails = {
@@ -54,8 +187,8 @@ export class ErrorBoundary extends Component<Props, State> {
       stack: error.stack,
       componentStack: errorInfo.componentStack,
       timestamp: new Date().toISOString(),
-      userAgent: navigator.userAgent,
-      url: window.location.href,
+      userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'Unknown',
+      url: typeof window !== 'undefined' ? window.location.href : 'Unknown',
     };
 
     // In a real app, you'd send this to your error tracking service
@@ -85,12 +218,14 @@ export class ErrorBoundary extends Component<Props, State> {
   private copyErrorDetails = async () => {
     if (!this.state.error) return;
 
-    const errorText = `Error: ${this.state.error.message}\n\nStack: ${this.state.error.stack}\n\nComponent Stack: ${this.state.errorInfo?.componentStack || 'N/A'}\n\nTimestamp: ${new Date().toISOString()}\nURL: ${window.location.href}`;
+    const errorText = `Error: ${this.state.error.message}\n\nStack: ${this.state.error.stack}\n\nComponent Stack: ${this.state.errorInfo?.componentStack || 'N/A'}\n\nTimestamp: ${new Date().toISOString()}\nURL: ${typeof window !== 'undefined' ? window.location.href : 'Unknown'}`;
     
     try {
-      await navigator.clipboard.writeText(errorText);
-      this.setState({ copied: true });
-      setTimeout(() => this.setState({ copied: false }), 2000);
+      if (typeof navigator !== 'undefined' && navigator.clipboard) {
+        await navigator.clipboard.writeText(errorText);
+        this.setState({ copied: true });
+        setTimeout(() => this.setState({ copied: false }), 2000);
+      }
     } catch (err) {
       console.error('Failed to copy error details:', err);
     }

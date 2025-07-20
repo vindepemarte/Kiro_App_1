@@ -45,12 +45,17 @@ export function MobileCard({
 
   return (
     <Card className={cn(
-      "w-full",
+      "w-full transition-smooth animate-fade-in",
       // Responsive styling with breakpoints
       "rounded-lg shadow-sm border-gray-200",
       "sm:rounded-xl sm:shadow-md",
       "md:rounded-lg md:shadow-sm",
       "lg:rounded-xl lg:shadow-md",
+      // Enhanced hover and active states
+      "hover:shadow-md hover:border-gray-300",
+      "active:scale-[0.98] active:shadow-sm",
+      // Touch-friendly interactions
+      isMobile && "touch-manipulation select-none",
       className
     )}>
       <CardHeader className={cn(

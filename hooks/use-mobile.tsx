@@ -10,23 +10,31 @@ import { useState, useEffect } from "react"
  */
 export function useMobile() {
   const [isMobile, setIsMobile] = useState(false)
+  const [isClient, setIsClient] = useState(false)
 
   useEffect(() => {
+    setIsClient(true)
+    
     const checkDevice = () => {
-      setIsMobile(window.innerWidth < 768)
+      if (typeof window !== 'undefined') {
+        setIsMobile(window.innerWidth < 768)
+      }
     }
 
     // Check on mount
     checkDevice()
 
     // Listen for resize events
-    window.addEventListener("resize", checkDevice)
-    
-    // Cleanup
-    return () => window.removeEventListener("resize", checkDevice)
+    if (typeof window !== 'undefined') {
+      window.addEventListener("resize", checkDevice)
+      
+      // Cleanup
+      return () => window.removeEventListener("resize", checkDevice)
+    }
   }, [])
 
-  return isMobile
+  // Return false during SSR to prevent hydration mismatches
+  return isClient ? isMobile : false
 }
 
 /**
@@ -34,20 +42,27 @@ export function useMobile() {
  */
 export function useTablet() {
   const [isTablet, setIsTablet] = useState(false)
+  const [isClient, setIsClient] = useState(false)
 
   useEffect(() => {
+    setIsClient(true)
+    
     const checkDevice = () => {
-      const width = window.innerWidth
-      setIsTablet(width >= 768 && width < 1024)
+      if (typeof window !== 'undefined') {
+        const width = window.innerWidth
+        setIsTablet(width >= 768 && width < 1024)
+      }
     }
 
     checkDevice()
-    window.addEventListener("resize", checkDevice)
     
-    return () => window.removeEventListener("resize", checkDevice)
+    if (typeof window !== 'undefined') {
+      window.addEventListener("resize", checkDevice)
+      return () => window.removeEventListener("resize", checkDevice)
+    }
   }, [])
 
-  return isTablet
+  return isClient ? isTablet : false
 }
 
 /**
@@ -55,26 +70,33 @@ export function useTablet() {
  */
 export function useDeviceType() {
   const [deviceType, setDeviceType] = useState<'mobile' | 'tablet' | 'desktop'>('desktop')
+  const [isClient, setIsClient] = useState(false)
 
   useEffect(() => {
+    setIsClient(true)
+    
     const checkDevice = () => {
-      const width = window.innerWidth
-      if (width < 768) {
-        setDeviceType('mobile')
-      } else if (width < 1024) {
-        setDeviceType('tablet')
-      } else {
-        setDeviceType('desktop')
+      if (typeof window !== 'undefined') {
+        const width = window.innerWidth
+        if (width < 768) {
+          setDeviceType('mobile')
+        } else if (width < 1024) {
+          setDeviceType('tablet')
+        } else {
+          setDeviceType('desktop')
+        }
       }
     }
 
     checkDevice()
-    window.addEventListener("resize", checkDevice)
     
-    return () => window.removeEventListener("resize", checkDevice)
+    if (typeof window !== 'undefined') {
+      window.addEventListener("resize", checkDevice)
+      return () => window.removeEventListener("resize", checkDevice)
+    }
   }, [])
 
-  return deviceType
+  return isClient ? deviceType : 'desktop'
 }
 
 /**
@@ -84,26 +106,38 @@ export function useBreakpoint() {
   const [breakpoint, setBreakpoint] = useState({
     isMobile: false,
     isTablet: false,
-    isDesktop: false,
-    width: 0
+    isDesktop: true, // Default to desktop for SSR
+    width: 1024 // Default width for SSR
   })
+  const [isClient, setIsClient] = useState(false)
 
   useEffect(() => {
+    setIsClient(true)
+    
     const updateBreakpoint = () => {
-      const width = window.innerWidth
-      setBreakpoint({
-        isMobile: width < 768,
-        isTablet: width >= 768 && width < 1024,
-        isDesktop: width >= 1024,
-        width
-      })
+      if (typeof window !== 'undefined') {
+        const width = window.innerWidth
+        setBreakpoint({
+          isMobile: width < 768,
+          isTablet: width >= 768 && width < 1024,
+          isDesktop: width >= 1024,
+          width
+        })
+      }
     }
 
     updateBreakpoint()
-    window.addEventListener("resize", updateBreakpoint)
     
-    return () => window.removeEventListener("resize", updateBreakpoint)
+    if (typeof window !== 'undefined') {
+      window.addEventListener("resize", updateBreakpoint)
+      return () => window.removeEventListener("resize", updateBreakpoint)
+    }
   }, [])
 
-  return breakpoint
+  return isClient ? breakpoint : {
+    isMobile: false,
+    isTablet: false,
+    isDesktop: true,
+    width: 1024
+  }
 }

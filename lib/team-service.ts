@@ -10,6 +10,7 @@ import {
   Notification
 } from './types';
 import { DatabaseService } from './database';
+import { ErrorHandler, AppError, retryOperation } from './error-handler';
 
 export interface TeamService {
   // Team CRUD operations
@@ -18,6 +19,10 @@ export interface TeamService {
   getUserTeams(userId: string): Promise<Team[]>;
   updateTeam(teamId: string, updates: Partial<Team>): Promise<boolean>;
   deleteTeam(teamId: string, userId: string): Promise<boolean>;
+  
+  // Real-time team subscriptions
+  subscribeToTeam(teamId: string, callback: (team: Team | null) => void): () => void;
+  subscribeToUserTeams(userId: string, callback: (teams: Team[]) => void): () => void;
   
   // User search functionality
   searchUserByEmail(email: string): Promise<User | null>;
@@ -48,43 +53,141 @@ export class TeamManagementService implements TeamService {
   // ===== TEAM CRUD OPERATIONS =====
 
   async createTeam(teamData: CreateTeamData): Promise<string> {
-    try {
-      const teamId = await this.databaseService.createTeam(teamData);
-      return teamId;
-    } catch (error) {
-      throw new Error(`Failed to create team: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
+    return await retryOperation(async () => {
+      try {
+        // Validate inputs
+        if (!teamData?.name?.trim()) {
+          throw new AppError('Team name is required', 'VALIDATION_ERROR', false, 'Please provide a team name');
+        }
+        if (!teamData?.createdBy?.trim()) {
+          throw new AppError('Creator ID is required', 'VALIDATION_ERROR', false, 'Please sign in and try again');
+        }
+
+        const teamId = await this.databaseService.createTeam(teamData);
+        return teamId;
+      } catch (error) {
+        throw ErrorHandler.handleError(error, 'Create Team');
+      }
+    }, {
+      maxRetries: 2,
+      retryCondition: (error) => {
+        const appError = ErrorHandler.normalizeError(error);
+        return appError.retryable && !['VALIDATION_ERROR'].includes(appError.code);
+      }
+    });
   }
 
   async getTeam(teamId: string): Promise<Team | null> {
-    try {
-      return await this.databaseService.getTeamById(teamId);
-    } catch (error) {
-      throw new Error(`Failed to get team: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
+    return await retryOperation(async () => {
+      try {
+        // Validate inputs
+        if (!teamId?.trim()) {
+          throw new AppError('Team ID is required', 'VALIDATION_ERROR', false, 'Invalid team ID');
+        }
+
+        return await this.databaseService.getTeamById(teamId);
+      } catch (error) {
+        throw ErrorHandler.handleError(error, 'Get Team');
+      }
+    }, {
+      maxRetries: 2,
+      retryCondition: (error) => {
+        const appError = ErrorHandler.normalizeError(error);
+        return appError.retryable && !['VALIDATION_ERROR'].includes(appError.code);
+      }
+    });
   }
 
   async getUserTeams(userId: string): Promise<Team[]> {
-    try {
-      return await this.databaseService.getUserTeams(userId);
-    } catch (error) {
-      throw new Error(`Failed to get user teams: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
+    return await retryOperation(async () => {
+      try {
+        // Validate inputs
+        if (!userId?.trim()) {
+          throw new AppError('User ID is required', 'VALIDATION_ERROR', false, 'Please sign in and try again');
+        }
+
+        return await this.databaseService.getUserTeams(userId);
+      } catch (error) {
+        throw ErrorHandler.handleError(error, 'Get User Teams');
+      }
+    }, {
+      maxRetries: 2,
+      retryCondition: (error) => {
+        const appError = ErrorHandler.normalizeError(error);
+        return appError.retryable && !['VALIDATION_ERROR'].includes(appError.code);
+      }
+    });
   }
 
   async updateTeam(teamId: string, updates: Partial<Team>): Promise<boolean> {
-    try {
-      return await this.databaseService.updateTeam(teamId, updates);
-    } catch (error) {
-      throw new Error(`Failed to update team: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
+    return await retryOperation(async () => {
+      try {
+        // Validate inputs
+        if (!teamId?.trim()) {
+          throw new AppError('Team ID is required', 'VALIDATION_ERROR', false, 'Invalid team ID');
+        }
+        if (!updates || Object.keys(updates).length === 0) {
+          throw new AppError('Updates are required', 'VALIDATION_ERROR', false, 'No updates provided');
+        }
+
+        return await this.databaseService.updateTeam(teamId, updates);
+      } catch (error) {
+        throw ErrorHandler.handleError(error, 'Update Team');
+      }
+    }, {
+      maxRetries: 2,
+      retryCondition: (error) => {
+        const appError = ErrorHandler.normalizeError(error);
+        return appError.retryable && !['VALIDATION_ERROR'].includes(appError.code);
+      }
+    });
   }
 
   async deleteTeam(teamId: string, userId: string): Promise<boolean> {
+    return await retryOperation(async () => {
+      try {
+        // Validate inputs
+        if (!teamId?.trim()) {
+          throw new AppError('Team ID is required', 'VALIDATION_ERROR', false, 'Invalid team ID');
+        }
+        if (!userId?.trim()) {
+          throw new AppError('User ID is required', 'VALIDATION_ERROR', false, 'Please sign in and try again');
+        }
+
+        return await this.databaseService.deleteTeam(teamId, userId);
+      } catch (error) {
+        throw ErrorHandler.handleError(error, 'Delete Team');
+      }
+    }, {
+      maxRetries: 1, // Only retry once for delete operations
+      retryCondition: (error) => {
+        const appError = ErrorHandler.normalizeError(error);
+        return appError.retryable && !['VALIDATION_ERROR', 'PERMISSION_DENIED'].includes(appError.code);
+      }
+    });
+  }
+
+  // ===== REAL-TIME TEAM SUBSCRIPTIONS =====
+
+  subscribeToTeam(teamId: string, callback: (team: Team | null) => void): () => void {
     try {
-      return await this.databaseService.deleteTeam(teamId, userId);
+      // Use the database service's real-time subscription for individual teams
+      return this.databaseService.subscribeToTeam(teamId, callback);
     } catch (error) {
-      throw new Error(`Failed to delete team: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      console.error('Failed to subscribe to team updates:', error);
+      // Return a no-op cleanup function if subscription fails
+      return () => {};
+    }
+  }
+
+  subscribeToUserTeams(userId: string, callback: (teams: Team[]) => void): () => void {
+    try {
+      // Use the database service's real-time subscription for user teams
+      return this.databaseService.subscribeToUserTeams(userId, callback);
+    } catch (error) {
+      console.error('Failed to subscribe to user teams updates:', error);
+      // Return a no-op cleanup function if subscription fails
+      return () => {};
     }
   }
 
@@ -116,146 +219,305 @@ export class TeamManagementService implements TeamService {
     email: string, 
     displayName: string
   ): Promise<void> {
-    try {
-      // Get team information
-      const team = await this.getTeam(teamId);
-      if (!team) {
-        throw new Error('Team not found');
-      }
-
-      // Check if inviter has permission to invite
-      const canInvite = await this.canManageTeam(teamId, inviterUserId);
-      if (!canInvite) {
-        throw new Error('You do not have permission to invite users to this team');
-      }
-
-      // Check if user is already a team member
-      const existingMember = team.members.find(member => 
-        member.email.toLowerCase() === email.toLowerCase()
-      );
-      if (existingMember) {
-        throw new Error('User is already a team member');
-      }
-
-      // Search for the user
-      const user = await this.searchUserByEmail(email);
-      if (!user) {
-        throw new Error('User not found');
-      }
-
-      // Get inviter information
-      const inviterMember = team.members.find(member => member.userId === inviterUserId);
-      const inviterName = inviterMember?.displayName || 'Team Admin';
-
-      // Create invitation notification
-      const invitationData: CreateNotificationData = {
-        userId: user.uid,
-        type: 'team_invitation',
-        title: `Team Invitation: ${team.name}`,
-        message: `${inviterName} has invited you to join the team "${team.name}"`,
-        data: {
-          teamId: team.id,
-          teamName: team.name,
-          inviterId: inviterUserId,
-          inviterName: inviterName,
+    return await retryOperation(async () => {
+      try {
+        // Validate inputs
+        if (!teamId?.trim()) {
+          throw new AppError('Team ID is required', 'VALIDATION_ERROR', false, 'Invalid team information');
         }
-      };
+        if (!inviterUserId?.trim()) {
+          throw new AppError('Inviter ID is required', 'VALIDATION_ERROR', false, 'Please sign in and try again');
+        }
+        if (!email?.trim()) {
+          throw new AppError('Email is required', 'VALIDATION_ERROR', false, 'Please provide an email address');
+        }
+        if (!displayName?.trim()) {
+          throw new AppError('Display name is required', 'VALIDATION_ERROR', false, 'Please provide a display name');
+        }
 
-      await this.databaseService.createNotification(invitationData);
+        // Validate email format
+        if (!this.isValidEmail(email)) {
+          throw new AppError('Invalid email format', 'VALIDATION_ERROR', false, 'Please provide a valid email address');
+        }
 
-      // Add user as invited member
-      const newMember: Omit<TeamMember, 'joinedAt'> = {
-        userId: user.uid,
-        email: email.toLowerCase(),
-        displayName: displayName || user.displayName || email.split('@')[0],
-        role: 'member',
-        status: 'invited'
-      };
+        // Get team information
+        const team = await this.getTeam(teamId);
+        if (!team) {
+          throw new AppError('Team not found', 'NOT_FOUND', false, 'The specified team could not be found');
+        }
 
-      await this.addTeamMember(teamId, newMember);
+        // Check if inviter has permission to invite
+        const canInvite = await this.canManageTeam(teamId, inviterUserId);
+        if (!canInvite) {
+          throw new AppError('Permission denied', 'PERMISSION_DENIED', false, 'You do not have permission to invite users to this team');
+        }
 
-    } catch (error) {
-      throw new Error(`Failed to invite user to team: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
+        // Check if user is already a team member (including invited status)
+        const existingMember = team.members.find(member => 
+          member.email.toLowerCase() === email.toLowerCase()
+        );
+        if (existingMember) {
+          if (existingMember.status === 'invited') {
+            throw new AppError('User already invited', 'ALREADY_EXISTS', false, 'User has already been invited to this team');
+          } else if (existingMember.status === 'active') {
+            throw new AppError('User already member', 'ALREADY_EXISTS', false, 'User is already an active team member');
+          }
+        }
+
+        // Search for the user in the system
+        const user = await this.searchUserByEmail(email);
+        
+        // Get inviter information for the notification
+        const inviterMember = team.members.find(member => member.userId === inviterUserId);
+        const inviterName = inviterMember?.displayName || 'Team Admin';
+
+        // Generate a unique user ID for invitation tracking
+        const inviteeUserId = user?.uid || `invited-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+        // Add user as invited member first
+        const newMember: Omit<TeamMember, 'joinedAt'> = {
+          userId: inviteeUserId,
+          email: email.toLowerCase(),
+          displayName: displayName.trim(),
+          role: 'member',
+          status: 'invited'
+        };
+
+        await this.addTeamMember(teamId, newMember);
+
+        // Create invitation notification
+        const invitationData: CreateNotificationData = {
+          userId: inviteeUserId,
+          type: 'team_invitation',
+          title: `Team Invitation: ${team.name}`,
+          message: `${inviterName} has invited you to join the team "${team.name}". Click to accept or decline this invitation.`,
+          data: {
+            teamId: team.id,
+            teamName: team.name,
+            inviterId: inviterUserId,
+            inviterName: inviterName,
+            inviteeEmail: email.toLowerCase(),
+            inviteeDisplayName: displayName.trim()
+          }
+        };
+
+        await this.databaseService.createNotification(invitationData);
+
+        console.log(`Team invitation sent successfully: ${email} invited to ${team.name} by ${inviterName}`);
+
+      } catch (error) {
+        throw ErrorHandler.handleError(error, 'Invite User to Team');
+      }
+    }, {
+      maxRetries: 2,
+      retryCondition: (error) => {
+        const appError = ErrorHandler.normalizeError(error);
+        return appError.retryable && !['VALIDATION_ERROR', 'NOT_FOUND', 'PERMISSION_DENIED', 'ALREADY_EXISTS'].includes(appError.code);
+      }
+    });
   }
 
   async acceptTeamInvitation(invitationId: string, userId: string): Promise<void> {
-    try {
-      // Get the notification
-      const notifications = await this.databaseService.getUserNotifications(userId);
-      const invitation = notifications.find(n => n.id === invitationId && n.type === 'team_invitation');
-      
-      if (!invitation) {
-        throw new Error('Invitation not found');
+    return await retryOperation(async () => {
+      try {
+        // Validate inputs
+        if (!invitationId?.trim()) {
+          throw new AppError('Invitation ID is required', 'VALIDATION_ERROR', false, 'Invalid invitation');
+        }
+        if (!userId?.trim()) {
+          throw new AppError('User ID is required', 'VALIDATION_ERROR', false, 'Please sign in and try again');
+        }
+
+        // Get the notification
+        const notifications = await this.databaseService.getUserNotifications(userId);
+        const invitation = notifications.find(n => n.id === invitationId && n.type === 'team_invitation');
+        
+        if (!invitation) {
+          throw new AppError('Invitation not found', 'NOT_FOUND', false, 'Team invitation not found or already processed');
+        }
+
+        const { teamId, inviteeEmail } = invitation.data;
+        if (!teamId) {
+          throw new AppError('Invalid invitation data', 'VALIDATION_ERROR', false, 'Missing team information in invitation');
+        }
+
+        // Get the team to verify it still exists
+        const team = await this.getTeam(teamId);
+        if (!team) {
+          throw new AppError('Team not found', 'NOT_FOUND', false, 'Team no longer exists');
+        }
+
+        // Find the invited member record
+        const invitedMember = team.members.find(member => 
+          member.status === 'invited' && 
+          (member.userId === userId || member.email.toLowerCase() === inviteeEmail?.toLowerCase())
+        );
+
+        if (!invitedMember) {
+          throw new AppError('Invitation record not found', 'NOT_FOUND', false, 'Invitation record not found in team members');
+        }
+
+        // Update the member record to active status and link to actual user
+        const memberUpdates: Partial<TeamMember> = {
+          status: 'active',
+          userId: userId, // Link to the actual authenticated user
+        };
+
+        await this.databaseService.updateTeamMember(teamId, invitedMember.userId, memberUpdates);
+
+        // If the invited member had a temporary ID, we need to remove the old record and add a new one
+        if (invitedMember.userId !== userId && invitedMember.userId.startsWith('invited-')) {
+          // Remove the temporary member record
+          await this.databaseService.removeTeamMember(teamId, invitedMember.userId);
+          
+          // Add the user with their actual ID
+          const activeMember: Omit<TeamMember, 'joinedAt'> = {
+            userId: userId,
+            email: invitedMember.email,
+            displayName: invitedMember.displayName,
+            role: invitedMember.role,
+            status: 'active'
+          };
+          
+          await this.addTeamMember(teamId, activeMember);
+        }
+
+        // Clean up the notification
+        await this.databaseService.deleteNotification(invitationId);
+
+        console.log(`Team invitation accepted: User ${userId} joined team ${team.name}`);
+
+      } catch (error) {
+        throw ErrorHandler.handleError(error, 'Accept Team Invitation');
       }
-
-      const teamId = invitation.data.teamId;
-      if (!teamId) {
-        throw new Error('Invalid invitation data');
+    }, {
+      maxRetries: 2,
+      retryCondition: (error) => {
+        const appError = ErrorHandler.normalizeError(error);
+        return appError.retryable && !['VALIDATION_ERROR', 'NOT_FOUND'].includes(appError.code);
       }
-
-      // Update team member status to active
-      await this.databaseService.updateTeamMember(teamId, userId, { status: 'active' });
-
-      // Mark notification as read and delete it
-      await this.databaseService.markNotificationAsRead(invitationId);
-      await this.databaseService.deleteNotification(invitationId);
-
-    } catch (error) {
-      throw new Error(`Failed to accept team invitation: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
+    });
   }
 
   async declineTeamInvitation(invitationId: string, userId: string): Promise<void> {
-    try {
-      // Get the notification
-      const notifications = await this.databaseService.getUserNotifications(userId);
-      const invitation = notifications.find(n => n.id === invitationId && n.type === 'team_invitation');
-      
-      if (!invitation) {
-        throw new Error('Invitation not found');
+    return await retryOperation(async () => {
+      try {
+        // Validate inputs
+        if (!invitationId?.trim()) {
+          throw new AppError('Invitation ID is required', 'VALIDATION_ERROR', false, 'Invalid invitation');
+        }
+        if (!userId?.trim()) {
+          throw new AppError('User ID is required', 'VALIDATION_ERROR', false, 'Please sign in and try again');
+        }
+
+        // Get the notification
+        const notifications = await this.databaseService.getUserNotifications(userId);
+        const invitation = notifications.find(n => n.id === invitationId && n.type === 'team_invitation');
+        
+        if (!invitation) {
+          throw new AppError('Invitation not found', 'NOT_FOUND', false, 'Team invitation not found or already processed');
+        }
+
+        const { teamId, inviteeEmail } = invitation.data;
+        if (!teamId) {
+          throw new AppError('Invalid invitation data', 'VALIDATION_ERROR', false, 'Missing team information in invitation');
+        }
+
+        // Get the team to verify it still exists
+        const team = await this.getTeam(teamId);
+        if (team) {
+          // Find and remove the invited member record
+          const invitedMember = team.members.find(member => 
+            member.status === 'invited' && 
+            (member.userId === userId || member.email.toLowerCase() === inviteeEmail?.toLowerCase())
+          );
+
+          if (invitedMember) {
+            // Remove the invited member from the team
+            await this.databaseService.removeTeamMember(teamId, invitedMember.userId);
+            console.log(`Removed invited member ${invitedMember.email} from team ${team.name}`);
+          }
+        }
+
+        // Delete the notification
+        await this.databaseService.deleteNotification(invitationId);
+
+        console.log(`Team invitation declined: User ${userId} declined invitation to team ${team?.name || teamId}`);
+
+      } catch (error) {
+        throw ErrorHandler.handleError(error, 'Decline Team Invitation');
       }
-
-      const teamId = invitation.data.teamId;
-      if (!teamId) {
-        throw new Error('Invalid invitation data');
+    }, {
+      maxRetries: 2,
+      retryCondition: (error) => {
+        const appError = ErrorHandler.normalizeError(error);
+        return appError.retryable && !['VALIDATION_ERROR', 'NOT_FOUND'].includes(appError.code);
       }
-
-      // Remove user from team members
-      await this.removeTeamMember(teamId, userId, userId);
-
-      // Delete the notification
-      await this.databaseService.deleteNotification(invitationId);
-
-    } catch (error) {
-      throw new Error(`Failed to decline team invitation: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
+    });
   }
 
   // ===== TEAM MEMBER MANAGEMENT =====
 
   async addTeamMember(teamId: string, member: Omit<TeamMember, 'joinedAt'>): Promise<boolean> {
-    try {
-      return await this.databaseService.addTeamMember(teamId, member);
-    } catch (error) {
-      throw new Error(`Failed to add team member: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
+    return await retryOperation(async () => {
+      try {
+        // Validate inputs
+        if (!teamId?.trim()) {
+          throw new AppError('Team ID is required', 'VALIDATION_ERROR', false, 'Invalid team ID');
+        }
+        if (!member?.userId?.trim()) {
+          throw new AppError('Member user ID is required', 'VALIDATION_ERROR', false, 'Invalid member information');
+        }
+        if (!member?.email?.trim()) {
+          throw new AppError('Member email is required', 'VALIDATION_ERROR', false, 'Invalid member information');
+        }
+
+        return await this.databaseService.addTeamMember(teamId, member);
+      } catch (error) {
+        throw ErrorHandler.handleError(error, 'Add Team Member');
+      }
+    }, {
+      maxRetries: 2,
+      retryCondition: (error) => {
+        const appError = ErrorHandler.normalizeError(error);
+        return appError.retryable && !['VALIDATION_ERROR'].includes(appError.code);
+      }
+    });
   }
 
   async removeTeamMember(teamId: string, userId: string, removedBy: string): Promise<boolean> {
-    try {
-      // Check permissions - user can remove themselves, or admins can remove others
-      if (userId !== removedBy) {
-        const canRemove = await this.canManageTeam(teamId, removedBy);
-        if (!canRemove) {
-          throw new Error('You do not have permission to remove team members');
+    return await retryOperation(async () => {
+      try {
+        // Validate inputs
+        if (!teamId?.trim()) {
+          throw new AppError('Team ID is required', 'VALIDATION_ERROR', false, 'Invalid team ID');
         }
-      }
+        if (!userId?.trim()) {
+          throw new AppError('User ID is required', 'VALIDATION_ERROR', false, 'Invalid user ID');
+        }
+        if (!removedBy?.trim()) {
+          throw new AppError('Removed by user ID is required', 'VALIDATION_ERROR', false, 'Please sign in and try again');
+        }
 
-      return await this.databaseService.removeTeamMember(teamId, userId);
-    } catch (error) {
-      throw new Error(`Failed to remove team member: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
+        // Check permissions - user can remove themselves, or admins can remove others
+        if (userId !== removedBy) {
+          const canRemove = await this.canManageTeam(teamId, removedBy);
+          if (!canRemove) {
+            throw new AppError('Permission denied', 'PERMISSION_DENIED', false, 'You do not have permission to remove team members');
+          }
+        }
+
+        return await this.databaseService.removeTeamMember(teamId, userId);
+      } catch (error) {
+        throw ErrorHandler.handleError(error, 'Remove Team Member');
+      }
+    }, {
+      maxRetries: 2,
+      retryCondition: (error) => {
+        const appError = ErrorHandler.normalizeError(error);
+        return appError.retryable && !['VALIDATION_ERROR', 'PERMISSION_DENIED'].includes(appError.code);
+      }
+    });
   }
 
   async updateTeamMemberRole(
@@ -264,25 +526,60 @@ export class TeamManagementService implements TeamService {
     role: TeamMember['role'], 
     updatedBy: string
   ): Promise<boolean> {
-    try {
-      // Check permissions - only admins can change roles
-      const canUpdate = await this.isTeamAdmin(teamId, updatedBy);
-      if (!canUpdate) {
-        throw new Error('Only team admins can change member roles');
-      }
+    return await retryOperation(async () => {
+      try {
+        // Validate inputs
+        if (!teamId?.trim()) {
+          throw new AppError('Team ID is required', 'VALIDATION_ERROR', false, 'Invalid team ID');
+        }
+        if (!userId?.trim()) {
+          throw new AppError('User ID is required', 'VALIDATION_ERROR', false, 'Invalid user ID');
+        }
+        if (!role) {
+          throw new AppError('Role is required', 'VALIDATION_ERROR', false, 'Please specify a role');
+        }
+        if (!updatedBy?.trim()) {
+          throw new AppError('Updated by user ID is required', 'VALIDATION_ERROR', false, 'Please sign in and try again');
+        }
 
-      return await this.databaseService.updateTeamMember(teamId, userId, { role });
-    } catch (error) {
-      throw new Error(`Failed to update team member role: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
+        // Check permissions - only admins can change roles
+        const canUpdate = await this.isTeamAdmin(teamId, updatedBy);
+        if (!canUpdate) {
+          throw new AppError('Permission denied', 'PERMISSION_DENIED', false, 'Only team admins can change member roles');
+        }
+
+        return await this.databaseService.updateTeamMember(teamId, userId, { role });
+      } catch (error) {
+        throw ErrorHandler.handleError(error, 'Update Team Member Role');
+      }
+    }, {
+      maxRetries: 2,
+      retryCondition: (error) => {
+        const appError = ErrorHandler.normalizeError(error);
+        return appError.retryable && !['VALIDATION_ERROR', 'PERMISSION_DENIED'].includes(appError.code);
+      }
+    });
   }
 
   async getTeamMembers(teamId: string): Promise<TeamMember[]> {
-    try {
-      return await this.databaseService.getTeamMembers(teamId);
-    } catch (error) {
-      throw new Error(`Failed to get team members: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
+    return await retryOperation(async () => {
+      try {
+        // Validate inputs
+        if (!teamId?.trim()) {
+          throw new AppError('Team ID is required', 'VALIDATION_ERROR', false, 'Invalid team ID');
+        }
+
+        return await this.databaseService.getTeamMembers(teamId);
+      } catch (error) {
+        throw ErrorHandler.handleError(error, 'Get Team Members');
+      }
+    }, {
+      maxRetries: 2,
+      retryCondition: (error) => {
+        const appError = ErrorHandler.normalizeError(error);
+        return appError.retryable && !['VALIDATION_ERROR'].includes(appError.code);
+      }
+    });
   }
 
   // ===== SPEAKER-TO-TEAM-MEMBER MATCHING =====
