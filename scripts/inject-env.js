@@ -28,6 +28,12 @@ const envVars = {
 const envScript = `
 window.__ENV = ${JSON.stringify(envVars, null, 2)};
 console.log('Environment variables injected:', Object.keys(window.__ENV));
+
+// Add debugging info
+if (Object.keys(window.__ENV).some(key => !window.__ENV[key] && key.includes('FIREBASE'))) {
+  console.warn('⚠️ Some Firebase environment variables are missing. Authentication may not work properly.');
+  console.log('Visit /debug.html to see available environment variables');
+}
 `;
 
 // Write to public directory so it can be served

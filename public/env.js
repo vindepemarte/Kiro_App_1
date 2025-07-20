@@ -12,3 +12,9 @@ window.__ENV = {
   "NODE_ENV": "production"
 };
 console.log('Environment variables injected:', Object.keys(window.__ENV));
+
+// Add debugging info
+if (Object.keys(window.__ENV).some(key => !window.__ENV[key] && key.includes('FIREBASE'))) {
+  console.warn('⚠️ Some Firebase environment variables are missing. Authentication may not work properly.');
+  console.log('Visit /debug.html to see available environment variables');
+}

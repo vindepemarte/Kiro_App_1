@@ -31,7 +31,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>
-        <script src="/env.js" async></script>
+        <script src="/env.js"></script>
       </head>
       <body className={inter.className}>
         <ErrorBoundary showErrorDetails={process.env.NODE_ENV === 'development'}>
