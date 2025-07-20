@@ -549,7 +549,7 @@ export default function LandingPage() {
             <Brain className="h-6 w-6" />
             <span className="text-xl font-bold">MeetingAI</span>
           </div>
-          <p className="text-gray-400">© 2024 MeetingAI. All rights reserved.</p>
+          <p className="text-gray-400">© 2025 MeetingAI. All rights reserved.</p>
         </div>
       </footer>
     </div>
