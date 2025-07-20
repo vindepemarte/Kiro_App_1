@@ -19,9 +19,12 @@ service cloud.firestore {
     }
     
     // ===== TEAMS =====
-    // Allow authenticated users to read teams (simplified for now)
+    // Allow authenticated users to read teams they're members of
     match /artifacts/meeting-ai-mvp/teams/{teamId} {
-      allow read: if isAuthenticated();
+      allow read: if isAuthenticated() && (
+        request.auth.uid == resource.data.createdBy ||
+        request.auth.uid in resource.data.members.map(['userId'])
+      );
     }
     
     // Allow authenticated users to create teams
@@ -30,10 +33,12 @@ service cloud.firestore {
         request.auth.uid == request.resource.data.createdBy;
     }
     
-    // Allow team creators to update teams
+    // Allow team admins to update teams (including member management)
     match /artifacts/meeting-ai-mvp/teams/{teamId} {
-      allow update: if isAuthenticated() && 
-        request.auth.uid == resource.data.createdBy;
+      allow update: if isAuthenticated() && (
+        request.auth.uid == resource.data.createdBy ||
+        request.auth.uid in resource.data.members.map(['userId'])
+      );
     }
     
     // Allow team creators to delete teams

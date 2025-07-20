@@ -230,12 +230,17 @@ class TestTeamService {
     // Search for the user in the system
     const user = await this.searchUserByEmail(email);
     
+    // User must exist in the system to be invited (matching real implementation)
+    if (!user) {
+      throw new Error('User not found - the user must have an account before they can be invited to teams');
+    }
+    
     // Get inviter information for the notification
     const inviterMember = team.members.find(member => member.userId === inviterUserId);
     const inviterName = inviterMember?.displayName || 'Team Admin';
 
-    // Generate a unique user ID for invitation tracking
-    const inviteeUserId = user?.uid || `invited-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    // Use the real user ID consistently
+    const inviteeUserId = user.uid;
 
     // Add user as invited member first
     const newMember = {
@@ -248,7 +253,7 @@ class TestTeamService {
 
     await this.addTeamMember(teamId, newMember);
 
-    // Create invitation notification
+    // Create invitation notification with same user ID
     const invitationData = {
       userId: inviteeUserId,
       type: 'team_invitation',
@@ -312,27 +317,8 @@ class TestTeamService {
 
     await this.databaseService.updateTeamMember(teamId, invitedMember.userId, memberUpdates);
 
-    // If the invited member had a temporary ID, we need to remove the old record and add a new one
-    if (invitedMember.userId !== userId && invitedMember.userId.startsWith('invited-')) {
-      // Transfer notifications from old user ID to new user ID
-      const oldNotifications = this.databaseService.notifications.get(invitedMember.userId) || [];
-      this.databaseService.notifications.set(userId, oldNotifications);
-      this.databaseService.notifications.delete(invitedMember.userId);
-      
-      // Remove the temporary member record
-      await this.databaseService.removeTeamMember(teamId, invitedMember.userId);
-      
-      // Add the user with their actual ID
-      const activeMember = {
-        userId: userId,
-        email: invitedMember.email,
-        displayName: invitedMember.displayName,
-        role: invitedMember.role,
-        status: 'active'
-      };
-      
-      await this.addTeamMember(teamId, activeMember);
-    }
+    // Since we now require users to exist before invitations, 
+    // we shouldn't have temporary IDs anymore
 
     // Clean up the notification
     await this.databaseService.deleteNotification(invitationId);

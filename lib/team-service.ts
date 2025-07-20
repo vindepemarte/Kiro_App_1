@@ -222,22 +222,13 @@ export class TeamManagementService implements TeamService {
     return await retryOperation(async () => {
       try {
         // Validate inputs
-        if (!teamId?.trim()) {
-          throw new AppError('Team ID is required', 'VALIDATION_ERROR', false, 'Invalid team information');
-        }
-        if (!inviterUserId?.trim()) {
-          throw new AppError('Inviter ID is required', 'VALIDATION_ERROR', false, 'Please sign in and try again');
-        }
-        if (!email?.trim()) {
-          throw new AppError('Email is required', 'VALIDATION_ERROR', false, 'Please provide an email address');
-        }
-        if (!displayName?.trim()) {
-          throw new AppError('Display name is required', 'VALIDATION_ERROR', false, 'Please provide a display name');
+        if (!teamId?.trim() || !inviterUserId?.trim() || !email?.trim() || !displayName?.trim()) {
+          throw new AppError('Missing required invitation parameters', 'VALIDATION_ERROR', false, 'All invitation parameters are required');
         }
 
         // Validate email format
         if (!this.isValidEmail(email)) {
-          throw new AppError('Invalid email format', 'VALIDATION_ERROR', false, 'Please provide a valid email address');
+          throw new AppError('Invalid email address format', 'VALIDATION_ERROR', false, 'Please provide a valid email address');
         }
 
         // Get team information
@@ -267,12 +258,18 @@ export class TeamManagementService implements TeamService {
         // Search for the user in the system
         const user = await this.searchUserByEmail(email);
         
+        // User must exist in the system to be invited
+        if (!user) {
+          throw new AppError('User not found', 'NOT_FOUND', false, 'The user must have an account before they can be invited to teams');
+        }
+        
         // Get inviter information for the notification
         const inviterMember = team.members.find(member => member.userId === inviterUserId);
         const inviterName = inviterMember?.displayName || 'Team Admin';
 
-        // Generate a unique user ID for invitation tracking
-        const inviteeUserId = user?.uid || `invited-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        // Use the real user ID consistently (no more temporary IDs)
+        // Previously: const inviteeUserId = user?.uid || `invited-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        const inviteeUserId = user.uid;
 
         // Add user as invited member first
         const newMember: Omit<TeamMember, 'joinedAt'> = {
@@ -285,7 +282,7 @@ export class TeamManagementService implements TeamService {
 
         await this.addTeamMember(teamId, newMember);
 
-        // Create invitation notification
+        // Create invitation notification with same user ID
         const invitationData: CreateNotificationData = {
           userId: inviteeUserId,
           type: 'team_invitation',
@@ -306,7 +303,8 @@ export class TeamManagementService implements TeamService {
         console.log(`Team invitation sent successfully: ${email} invited to ${team.name} by ${inviterName}`);
 
       } catch (error) {
-        throw ErrorHandler.handleError(error, 'Invite User to Team');
+        console.error('Failed to invite user to team:', error);
+        throw new Error(`Failed to invite user to team: ${error.message}`);
       }
     }, {
       maxRetries: 2,

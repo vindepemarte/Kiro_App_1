@@ -167,9 +167,17 @@ export function TeamManagement({ className }: TeamManagementProps) {
     if (!user || !selectedTeam || !inviteMemberForm.email.trim() || !inviteMemberForm.displayName.trim()) return
 
     await executeOperation(async () => {
-      // Add user as invited member directly
+      // Only proceed if user was found
+      if (!searchResults) {
+        throw new Error('User not found. The person must have an account before they can be invited to teams.');
+      }
+
+      // Use the real user ID consistently
+      const inviteeUserId = searchResults.uid;
+
+      // Add user as invited member with real user ID
       const newMember: Omit<TeamMember, 'joinedAt'> = {
-        userId: searchResults?.uid || `temp-${Date.now()}`,
+        userId: inviteeUserId,
         email: inviteMemberForm.email.toLowerCase(),
         displayName: inviteMemberForm.displayName.trim(),
         role: 'member',
@@ -178,21 +186,21 @@ export function TeamManagement({ className }: TeamManagementProps) {
 
       await addTeamMember(selectedTeam.id, newMember)
 
-      // Create invitation notification
-      if (searchResults) {
-        await createNotification({
-          userId: searchResults.uid,
-          type: 'team_invitation',
-          title: `Team Invitation: ${selectedTeam.name}`,
-          message: `You have been invited to join the team "${selectedTeam.name}"`,
-          data: {
-            teamId: selectedTeam.id,
-            teamName: selectedTeam.name,
-            inviterId: user.uid,
-            inviterName: user.displayName || user.email || 'Team Admin',
-          }
-        })
-      }
+      // Create invitation notification with same user ID
+      await createNotification({
+        userId: inviteeUserId,
+        type: 'team_invitation',
+        title: `Team Invitation: ${selectedTeam.name}`,
+        message: `You have been invited to join the team "${selectedTeam.name}"`,
+        data: {
+          teamId: selectedTeam.id,
+          teamName: selectedTeam.name,
+          inviterId: user.uid,
+          inviterName: user.displayName || user.email || 'Team Admin',
+          inviteeEmail: inviteMemberForm.email.toLowerCase(),
+          inviteeDisplayName: inviteMemberForm.displayName.trim(),
+        }
+      })
 
       // Reset form and close dialog
       setInviteMemberForm({ email: '', displayName: '' })
