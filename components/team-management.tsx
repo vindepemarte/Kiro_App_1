@@ -41,7 +41,7 @@ import {
 } from "lucide-react"
 import { useAuth } from "@/contexts/auth-context"
 import { Team, TeamMember, CreateTeamData, User as UserType } from "@/lib/types"
-import { databaseService } from "@/lib/database"
+import { databaseService, createTeam, getUserTeams } from "@/lib/database"
 import { getTeamService } from "@/lib/team-service"
 import { useMobile } from "@/hooks/use-mobile"
 import { ResponsiveGrid, ResponsiveContainer } from "@/components/ui/responsive-grid"
@@ -97,9 +97,10 @@ export function TeamManagement({ className }: TeamManagementProps) {
     try {
       setLoading(true)
       setError(null)
-      const userTeams = await teamService.getUserTeams(user!.uid)
+      const userTeams = await getUserTeams(user!.uid)
       setTeams(userTeams)
     } catch (err) {
+      console.error('Error loading teams:', err)
       setError(err instanceof Error ? err.message : 'Failed to load teams')
     } finally {
       setLoading(false)
@@ -113,13 +114,24 @@ export function TeamManagement({ className }: TeamManagementProps) {
       setOperationLoading(true)
       setOperationError(null)
 
+      // Check if we're in browser environment
+      if (typeof window === 'undefined') {
+        throw new Error('Team creation is only available in browser environment')
+      }
+
+      // Validate database service
+      if (!databaseService) {
+        throw new Error('Database service is not available')
+      }
+
       const teamData: CreateTeamData = {
         name: createTeamForm.name.trim(),
         description: createTeamForm.description.trim(),
         createdBy: user.uid
       }
 
-      await teamService.createTeam(teamData)
+      // Use bound createTeam function to prevent context loss
+      const teamId = await createTeam(teamData)
       
       // Reset form and close dialog
       setCreateTeamForm({ name: '', description: '' })
@@ -128,7 +140,9 @@ export function TeamManagement({ className }: TeamManagementProps) {
       // Reload teams
       await loadUserTeams()
     } catch (err) {
-      setOperationError(err instanceof Error ? err.message : 'Failed to create team')
+      console.error('Error creating team:', err)
+      const errorMessage = err instanceof Error ? err.message : 'Failed to create team'
+      setOperationError(errorMessage)
     } finally {
       setOperationLoading(false)
     }

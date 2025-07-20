@@ -85,7 +85,16 @@ class FirestoreService implements DatabaseService {
 
   private get db(): Firestore {
     if (!this._db) {
-      this._db = getFirebaseDb();
+      try {
+        // Ensure we're in a browser environment
+        if (typeof window === 'undefined') {
+          throw new Error('Database service can only be used in browser environment');
+        }
+        this._db = getFirebaseDb();
+      } catch (error) {
+        console.error('Failed to initialize Firebase database:', error);
+        throw new Error(`Firebase database initialization failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }
     }
     return this._db;
   }
@@ -990,6 +999,16 @@ class FirestoreService implements DatabaseService {
 
 // Create and export singleton instance
 export const databaseService = new FirestoreService();
+
+// Ensure methods are properly bound to prevent context loss
+export const createTeam = databaseService.createTeam.bind(databaseService);
+export const getUserTeams = databaseService.getUserTeams.bind(databaseService);
+export const getTeamById = databaseService.getTeamById.bind(databaseService);
+export const updateTeam = databaseService.updateTeam.bind(databaseService);
+export const deleteTeam = databaseService.deleteTeam.bind(databaseService);
+export const addTeamMember = databaseService.addTeamMember.bind(databaseService);
+export const removeTeamMember = databaseService.removeTeamMember.bind(databaseService);
+export const updateTeamMember = databaseService.updateTeamMember.bind(databaseService);
 
 // Export the service class for testing
 export { FirestoreService };
