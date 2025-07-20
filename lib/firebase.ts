@@ -70,7 +70,7 @@ let auth: Auth | null = null;
 let db: Firestore | null = null;
 
 export function initializeFirebase() {
-  // Skip during build time
+  // Skip during build time or if we have demo credentials
   if (typeof window === 'undefined') {
     return { app: null, auth: null, db: null };
   }
@@ -127,20 +127,29 @@ export function initializeFirebase() {
   }
 }
 
-// Export getters
+// Export getters with build-time safety
 export function getFirebaseApp(): FirebaseApp {
+  if (typeof window === 'undefined') {
+    throw new Error('Firebase app cannot be initialized during build time');
+  }
   const { app } = initializeFirebase();
   if (!app) throw new Error('Firebase app not initialized');
   return app;
 }
 
 export function getFirebaseAuth(): Auth {
+  if (typeof window === 'undefined') {
+    throw new Error('Firebase auth cannot be initialized during build time');
+  }
   const { auth } = initializeFirebase();
   if (!auth) throw new Error('Firebase auth not initialized');
   return auth;
 }
 
 export function getFirebaseDb(): Firestore {
+  if (typeof window === 'undefined') {
+    throw new Error('Firebase db cannot be initialized during build time');
+  }
   const { db } = initializeFirebase();
   if (!db) throw new Error('Firebase db not initialized');
   return db;

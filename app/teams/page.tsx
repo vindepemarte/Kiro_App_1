@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { ResponsiveNavigation } from "@/components/responsive-navigation"
 import { ResponsiveContainer } from "@/components/ui/responsive-grid"
-import TeamManagement from "@/components/team-management"
+import { TeamManagement } from "@/components/team-management"
 import { authService } from "@/lib/auth"
 import { 
   Users, 
