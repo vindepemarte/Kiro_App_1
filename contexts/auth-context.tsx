@@ -44,13 +44,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
           }
         });
 
-        // Try to authenticate
+        // Try to authenticate - don't auto sign in anonymously
         const initialToken = authService.getInitialAuthToken();
         if (initialToken) {
           await authService.reauthenticateWithCustomToken(initialToken);
-        } else {
-          await authService.signInAnonymously();
         }
+        // Don't automatically sign in anonymously - let user choose
 
         return unsubscribe;
       } catch (error) {

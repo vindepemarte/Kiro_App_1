@@ -601,28 +601,36 @@ class FirestoreService implements DatabaseService {
 
   // Subscribe to real-time updates for user teams
   subscribeToUserTeams(userId: string, callback: (teams: Team[]) => void): Unsubscribe {
-    const teamsCollection = collection(this.db, this.getTeamsPath());
-    
-    return onSnapshot(
-      teamsCollection,
-      (querySnapshot: QuerySnapshot<DocumentData>) => {
-        const teams: Team[] = [];
-        
-        querySnapshot.forEach((doc) => {
-          const team = this.documentToTeam(doc);
-          if (team && team.members.some(member => member.userId === userId)) {
-            teams.push(team);
-          }
-        });
+    try {
+      const teamsCollection = collection(this.db, this.getTeamsPath());
+      
+      return onSnapshot(
+        teamsCollection,
+        (querySnapshot: QuerySnapshot<DocumentData>) => {
+          const teams: Team[] = [];
+          
+          querySnapshot.forEach((doc) => {
+            const team = this.documentToTeam(doc);
+            if (team && team.members.some(member => member.userId === userId)) {
+              teams.push(team);
+            }
+          });
 
-        teams.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
-        callback(teams);
-      },
-      (error: FirestoreError) => {
-        console.error('Real-time teams listener error:', error);
-        callback([]);
-      }
-    );
+          teams.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+          callback(teams);
+        },
+        (error: FirestoreError) => {
+          console.error('Real-time teams listener error:', error);
+          // Return empty array instead of failing
+          callback([]);
+        }
+      );
+    } catch (error) {
+      console.error('Failed to set up teams listener:', error);
+      // Return a no-op unsubscribe function
+      callback([]);
+      return () => {};
+    }
   }
 
   // ===== TEAM MEMBER OPERATIONS =====

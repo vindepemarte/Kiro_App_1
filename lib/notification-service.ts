@@ -170,6 +170,10 @@ class NotificationServiceImpl implements NotificationService {
       return notifications.filter(notification => !notification.read).length;
     } catch (error) {
       console.error('Failed to get unread count:', error);
+      // Check if it's a permission error and handle gracefully
+      if (error instanceof Error && error.message.includes('permission')) {
+        console.warn('Permission denied for notifications - user may need to authenticate');
+      }
       return 0; // Return 0 on error to avoid breaking UI
     }
   }
