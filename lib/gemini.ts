@@ -1,10 +1,10 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { getAppConfig } from './config';
-import { AIResponse, ActionItem } from './types';
+import { AIResponse, ActionItem, TeamMember } from './types';
 
 export interface GeminiService {
-  processTranscript(transcript: string): Promise<AIResponse>;
-  constructPrompt(transcript: string): string;
+  processTranscript(transcript: string, teamMembers?: TeamMember[]): Promise<AIResponse>;
+  constructPrompt(transcript: string, teamMembers?: TeamMember[]): string;
 }
 
 export interface GeminiError extends Error {
@@ -20,7 +20,7 @@ class GeminiServiceImpl implements GeminiService {
 
   constructor() {
     this.config = getAppConfig().gemini;
-    
+
     if (!this.config.apiKey) {
       throw new Error('Gemini API key is required. Please set NEXT_PUBLIC_GEMINI_API_KEY environment variable.');
     }
@@ -32,11 +32,26 @@ class GeminiServiceImpl implements GeminiService {
   /**
    * Construct AI prompt for meeting transcript analysis
    */
-  constructPrompt(transcript: string): string {
+  constructPrompt(transcript: string, teamMembers?: TeamMember[]): string {
+    let teamContext = '';
+    
+    if (teamMembers && teamMembers.length > 0) {
+      const activeMembers = teamMembers.filter(member => member.status === 'active');
+      if (activeMembers.length > 0) {
+        teamContext = `
+
+Team Members Context:
+The following team members participated in this meeting. When assigning action items, try to match speaker names to these team members:
+${activeMembers.map(member => `- ${member.displayName} (${member.email})`).join('\n')}
+
+When suggesting owners for action items, prefer using the exact display names from the team members list above.`;
+      }
+    }
+
     return `Analyze this meeting transcript and provide a JSON response with:
 1. A comprehensive summary (2-3 paragraphs)
 2. Action items with suggested owners and deadlines
-3. Priority levels for each action item
+3. Priority levels for each action item${teamContext}
 
 Format your response as valid JSON with this exact structure:
 {
@@ -56,7 +71,7 @@ Important guidelines:
 - Infer priority based on urgency and importance mentioned in the transcript
 - Use "high" for urgent/critical items, "medium" for important items, "low" for nice-to-have items
 - If no specific owner is mentioned, leave the owner field as null
-- If no deadline is mentioned, leave the deadline field as null
+- If no deadline is mentioned, leave the deadline field as null${teamMembers && teamMembers.length > 0 ? '\n- When suggesting owners, try to match speaker names to the team members listed above' : ''}
 - Ensure the response is valid JSON
 
 Meeting Transcript:
@@ -66,19 +81,19 @@ ${transcript}`;
   /**
    * Process meeting transcript using Gemini AI with retry logic
    */
-  async processTranscript(transcript: string): Promise<AIResponse> {
+  async processTranscript(transcript: string, teamMembers?: TeamMember[]): Promise<AIResponse> {
     if (!transcript || transcript.trim().length === 0) {
       throw new Error('Transcript content is required');
     }
 
-    const prompt = this.constructPrompt(transcript);
-    
+    const prompt = this.constructPrompt(transcript, teamMembers);
+
     return this.executeWithRetry(async () => {
       try {
         const result = await this.model.generateContent(prompt);
         const response = await result.response;
         const text = response.text();
-        
+
         return this.parseAIResponse(text);
       } catch (error) {
         throw this.handleGeminiError(error);
@@ -100,7 +115,7 @@ ${transcript}`;
       }
 
       const parsed = JSON.parse(cleanedText);
-      
+
       // Validate required fields
       if (!parsed.summary || typeof parsed.summary !== 'string') {
         throw new Error('Invalid response: summary is required and must be a string');
@@ -167,7 +182,7 @@ ${transcript}`;
         return await operation();
       } catch (error) {
         lastError = error as Error;
-        
+
         // Don't retry on non-retryable errors
         if (!this.isRetryableError(error as Error)) {
           throw error;
@@ -192,7 +207,7 @@ ${transcript}`;
    */
   private isRetryableError(error: Error): boolean {
     const geminiError = error as GeminiError;
-    
+
     // Retry on network errors, rate limits, and server errors
     if (geminiError.status) {
       return geminiError.status >= 500 || geminiError.status === 429;
@@ -217,7 +232,7 @@ ${transcript}`;
    */
   private handleGeminiError(error: any): GeminiError {
     const geminiError = new Error() as GeminiError;
-    
+
     if (error.status) {
       geminiError.status = error.status;
       geminiError.code = error.code || `HTTP_${error.status}`;

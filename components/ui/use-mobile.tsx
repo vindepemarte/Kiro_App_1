@@ -17,3 +17,6 @@ export function useIsMobile() {
 
   return !!isMobile
 }
+
+// Export the main useMobile hook for consistency
+export { useMobile } from "@/hooks/use-mobile"

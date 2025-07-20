@@ -2,9 +2,9 @@
 
 ## Overview
 
-This design transforms the existing MeetingAI Next.js application into a fully functional MVP by integrating Firebase authentication, Firestore database, and Google Gemini AI processing. The application will maintain its current UI/UX while adding the core backend functionality needed for production deployment.
+This design enhances the existing MeetingAI Next.js application with mobile-first responsive design and comprehensive team collaboration features. The application will support team management, task assignment, real-time notifications, and a fully responsive interface optimized for all device sizes.
 
-The design follows a client-side architecture with direct Firebase and Gemini API integration, optimized for rapid MVP deployment within 24 hours.
+The design maintains the existing client-side architecture while adding team collaboration services, notification systems, and mobile-optimized UI components. All new features integrate seamlessly with the current Firebase and Gemini AI infrastructure.
 
 ## Architecture
 
@@ -15,22 +15,32 @@ graph TB
     A[Next.js Frontend] --> B[Firebase Auth]
     A --> C[Firestore Database]
     A --> D[Gemini AI API]
+    A --> E[Notification Service]
     
-    B --> E[Anonymous/Custom Token Auth]
-    C --> F[User Meeting Data]
-    D --> G[AI Processing Results]
+    B --> F[Anonymous/Custom Token Auth]
+    C --> G[User Meeting Data]
+    C --> H[Team Data]
+    C --> I[Notification Data]
+    D --> J[AI Processing Results]
+    E --> K[Real-time Notifications]
     
-    H[Environment Config] --> A
-    H --> B
-    H --> C
-    H --> D
+    L[Environment Config] --> A
+    L --> B
+    L --> C
+    L --> D
+    
+    M[Mobile-First UI] --> A
+    N[Team Management] --> C
+    O[Task Assignment] --> C
 ```
 
 ### Data Flow
 
 1. **Authentication Flow**: App loads → Check for custom token → Authenticate → Set user context
-2. **Upload Flow**: File selected → Read content → Validate → Send to Gemini → Parse response → Save to Firestore
-3. **Display Flow**: Dashboard loads → Fetch user meetings → Display list → Navigate to reports
+2. **Upload Flow**: File selected → Read content → Validate → Send to Gemini → Parse response → Auto-assign tasks → Save to Firestore
+3. **Display Flow**: Dashboard loads → Fetch user meetings → Fetch team data → Display unified view → Navigate to reports
+4. **Team Flow**: Create team → Search members by email → Send invitations → Handle accept/decline → Update team roster
+5. **Task Assignment Flow**: Process meeting → Match speakers to team members → Auto-assign tasks → Allow manual reassignment → Send notifications
 
 ## Components and Interfaces
 
@@ -118,6 +128,64 @@ interface DatabaseService {
   getUserMeetings(userId: string): Promise<Meeting[]>
   getMeetingById(meetingId: string): Promise<Meeting | null>
   subscribeToUserMeetings(userId: string, callback: (meetings: Meeting[]) => void): void
+  
+  // Team Management
+  createTeam(team: CreateTeamData): Promise<string>
+  getUserTeams(userId: string): Promise<Team[]>
+  getTeamById(teamId: string): Promise<Team | null>
+  updateTeamMember(teamId: string, memberData: TeamMember): Promise<void>
+  removeTeamMember(teamId: string, userId: string): Promise<void>
+  
+  // Task Assignment
+  assignTask(taskId: string, assigneeId: string, assignedBy: string): Promise<void>
+  updateTaskStatus(taskId: string, status: TaskStatus): Promise<void>
+  getTeamTasks(teamId: string): Promise<ActionItem[]>
+  
+  // Notifications
+  createNotification(notification: CreateNotificationData): Promise<string>
+  getUserNotifications(userId: string): Promise<Notification[]>
+  markNotificationAsRead(notificationId: string): Promise<void>
+  subscribeToUserNotifications(userId: string, callback: (notifications: Notification[]) => void): void
+}
+```
+
+### Team Management Service
+
+```typescript
+interface TeamService {
+  searchUserByEmail(email: string): Promise<User | null>
+  inviteUserToTeam(teamId: string, email: string, displayName: string): Promise<void>
+  acceptTeamInvitation(invitationId: string): Promise<void>
+  declineTeamInvitation(invitationId: string): Promise<void>
+  matchSpeakerToTeamMember(speakerName: string, teamMembers: TeamMember[]): TeamMember | null
+}
+```
+
+### Notification Service
+
+```typescript
+interface NotificationService {
+  sendTeamInvitation(invitation: TeamInvitationData): Promise<void>
+  sendTaskAssignment(assignment: TaskAssignmentData): Promise<void>
+  markAsRead(notificationId: string): Promise<void>
+  getUnreadCount(userId: string): Promise<number>
+}
+```
+
+### Mobile-First UI Components
+
+```typescript
+interface ResponsiveNavigation {
+  isMobile: boolean
+  isTablet: boolean
+  showMobileMenu: boolean
+  toggleMobileMenu(): void
+}
+
+interface TouchOptimizedControls {
+  minTouchTarget: '44px'
+  swipeGestures: boolean
+  hapticFeedback: boolean
 }
 ```
 
@@ -131,8 +199,32 @@ interface DatabaseService {
   summary: string
   actionItems: ActionItem[]
   rawTranscript: string
+  teamId?: string
   createdAt: timestamp
   updatedAt: timestamp
+}
+
+/artifacts/{appId}/teams/{teamId}
+{
+  id: string
+  name: string
+  description: string
+  createdBy: string
+  members: TeamMember[]
+  createdAt: timestamp
+  updatedAt: timestamp
+}
+
+/artifacts/{appId}/notifications/{notificationId}
+{
+  id: string
+  userId: string
+  type: 'team_invitation' | 'task_assignment' | 'task_completed'
+  title: string
+  message: string
+  data: any
+  read: boolean
+  createdAt: timestamp
 }
 ```
 
@@ -148,6 +240,7 @@ interface Meeting {
   summary: string
   actionItems: ActionItem[]
   rawTranscript: string
+  teamId?: string
   createdAt: Date
   updatedAt: Date
 }
@@ -156,15 +249,116 @@ interface ActionItem {
   id: string
   description: string
   owner?: string
+  assigneeId?: string
+  assigneeName?: string
   deadline?: Date
   priority: 'high' | 'medium' | 'low'
-  status: 'pending' | 'completed'
+  status: 'pending' | 'in_progress' | 'completed'
+  assignedBy?: string
+  assignedAt?: Date
 }
 
 interface User {
   uid: string
+  email?: string
+  displayName?: string
   isAnonymous: boolean
   customClaims?: any
+}
+
+interface Team {
+  id: string
+  name: string
+  description: string
+  createdBy: string
+  members: TeamMember[]
+  createdAt: Date
+  updatedAt: Date
+}
+
+interface TeamMember {
+  userId: string
+  email: string
+  displayName: string
+  role: 'admin' | 'member'
+  joinedAt: Date
+  status: 'active' | 'invited' | 'inactive'
+}
+
+interface Notification {
+  id: string
+  userId: string
+  type: 'team_invitation' | 'task_assignment' | 'task_completed' | 'task_overdue'
+  title: string
+  message: string
+  data: NotificationData
+  read: boolean
+  createdAt: Date
+}
+
+interface NotificationData {
+  teamId?: string
+  teamName?: string
+  taskId?: string
+  taskDescription?: string
+  inviterId?: string
+  inviterName?: string
+  meetingId?: string
+  meetingTitle?: string
+}
+
+interface CreateTeamData {
+  name: string
+  description: string
+  createdBy: string
+}
+
+interface CreateNotificationData {
+  userId: string
+  type: Notification['type']
+  title: string
+  message: string
+  data: NotificationData
+}
+
+interface TeamInvitationData {
+  teamId: string
+  teamName: string
+  inviterName: string
+  inviteeEmail: string
+  inviteeDisplayName: string
+}
+
+interface TaskAssignmentData {
+  taskId: string
+  taskDescription: string
+  assigneeId: string
+  assigneeName: string
+  meetingTitle: string
+  assignedBy: string
+}
+```
+
+### Mobile-First Design Specifications
+
+```typescript
+interface ResponsiveBreakpoints {
+  mobile: '320px - 767px'
+  tablet: '768px - 1023px'
+  desktop: '1024px+'
+}
+
+interface TouchTargetSpecs {
+  minimum: '44px x 44px'
+  recommended: '48px x 48px'
+  spacing: '8px minimum between targets'
+}
+
+interface MobileNavigationSpecs {
+  hamburgerMenu: boolean
+  bottomNavigation: boolean
+  swipeGestures: boolean
+  collapsibleSections: boolean
 }
 ```
 
@@ -190,6 +384,121 @@ interface AppConfig {
 }
 ```
 
+## Mobile-First UI Design
+
+### Responsive Navigation Design
+
+**Mobile Navigation (320px - 767px):**
+- Hamburger menu with slide-out drawer
+- Bottom navigation bar for primary actions
+- Collapsible sections for content organization
+- Touch-optimized button sizes (minimum 44px)
+
+**Tablet Navigation (768px - 1023px):**
+- Sidebar navigation with collapsible sections
+- Optimized for both portrait and landscape orientations
+- Touch and mouse interaction support
+- Adaptive grid layouts
+
+**Desktop Navigation (1024px+):**
+- Full sidebar navigation
+- Multi-column layouts
+- Hover states and keyboard navigation
+- Advanced filtering and sorting controls
+
+### Component Responsive Behavior
+
+```typescript
+interface ResponsiveComponents {
+  // Navigation
+  MobileNavigation: {
+    hamburgerMenu: boolean
+    slideOutDrawer: boolean
+    bottomNavigation: boolean
+  }
+  
+  // Dashboard Layout
+  DashboardGrid: {
+    mobile: '1 column'
+    tablet: '2 columns'
+    desktop: '3 columns'
+  }
+  
+  // Meeting Cards
+  MeetingCard: {
+    mobile: 'full width, stacked content'
+    tablet: 'half width, side-by-side content'
+    desktop: 'third width, compact layout'
+  }
+  
+  // Task Assignment
+  TaskAssignment: {
+    mobile: 'modal overlay'
+    tablet: 'inline dropdown'
+    desktop: 'hover dropdown'
+  }
+}
+```
+
+## Team Collaboration Features
+
+### Team Management Workflow
+
+1. **Team Creation**
+   - User creates team with name and description
+   - System assigns creator as admin
+   - Team gets unique ID and Firestore document
+
+2. **Member Invitation**
+   - Admin searches for users by email
+   - System creates invitation notification
+   - Invitee receives real-time notification
+   - Accept/decline options update team membership
+
+3. **Speaker-to-Member Matching**
+   - AI extracts speaker names from transcripts
+   - System attempts fuzzy matching to team member display names
+   - Manual assignment available for unmatched speakers
+   - Assignment preferences saved for future meetings
+
+### Task Assignment System
+
+```typescript
+interface TaskAssignmentFlow {
+  automaticAssignment: {
+    speakerMatching: boolean
+    previousAssignments: boolean
+    workloadBalancing: boolean
+  }
+  
+  manualAssignment: {
+    teamMemberDropdown: boolean
+    bulkAssignment: boolean
+    reassignmentHistory: boolean
+  }
+  
+  notifications: {
+    newAssignment: boolean
+    statusChange: boolean
+    overdueReminder: boolean
+  }
+}
+```
+
+### Real-time Notification System
+
+**Notification Types:**
+- Team invitations with accept/decline actions
+- Task assignments with task details
+- Task status updates and completions
+- Overdue task reminders
+
+**Notification Delivery:**
+- Real-time Firestore listeners
+- In-app notification center
+- Badge counts on navigation items
+- Toast notifications for immediate actions
+
 ## Error Handling
 
 ### Error Categories and Responses
@@ -214,12 +523,23 @@ interface AppConfig {
    - Permission errors: Re-authentication prompt
    - Quota exceeded: Usage limit notification
 
+5. **Team Management Errors**
+   - User not found: Clear search feedback
+   - Invitation failures: Retry mechanism
+   - Permission denied: Role-based error messages
+
+6. **Mobile-Specific Errors**
+   - Touch gesture failures: Fallback to button controls
+   - Viewport issues: Responsive layout adjustments
+   - Network connectivity: Offline mode indicators
+
 ### Error Recovery Strategies
 
 - **Retry Logic**: Exponential backoff for transient failures
 - **Fallback Modes**: Graceful degradation when services unavailable
 - **User Communication**: Clear, actionable error messages
 - **Logging**: Comprehensive error tracking for debugging
+- **Mobile Optimization**: Touch-friendly error dialogs and recovery options
 
 ## Testing Strategy
 

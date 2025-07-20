@@ -7,13 +7,15 @@ import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
-import { Brain, Clock, Users, CheckCircle, ArrowRight, Zap, Shield, BarChart3 } from "lucide-react"
+import { Brain, Clock, Users, CheckCircle, ArrowRight, Zap, Shield, BarChart3, Menu } from "lucide-react"
 import { useAuth } from "@/contexts/auth-context"
-import { 
-  handleAuthError, 
+import {
+  handleAuthError,
   showSuccess
 } from "@/lib/error-handler"
 import { authService } from "@/lib/auth"
+import { useMobile } from "@/hooks/use-mobile"
+import { ResponsiveContainer } from "@/components/ui/responsive-grid"
 
 export default function LandingPage() {
   const [email, setEmail] = useState("")
@@ -21,8 +23,10 @@ export default function LandingPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [authError, setAuthError] = useState<string | null>(null)
   const [isClient, setIsClient] = useState(false)
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const router = useRouter()
   const { user, loading, error, initializeAuth, reauthenticate } = useAuth()
+  const isMobile = useMobile()
 
   // Ensure client-side only rendering to prevent hydration issues
   useEffect(() => {
@@ -78,7 +82,7 @@ export default function LandingPage() {
   const handleAuth = async (type: "login" | "signup" | "anonymous") => {
     setIsLoading(true)
     setAuthError(null)
-    
+
     try {
       if (type === "anonymous") {
         // Use anonymous authentication
@@ -102,7 +106,7 @@ export default function LandingPage() {
   const handleGoogleAuth = async () => {
     setIsLoading(true)
     setAuthError(null)
-    
+
     try {
       await authService.signInWithGoogle()
       showSuccess("Successfully signed in with Google!", "Welcome")
@@ -119,50 +123,100 @@ export default function LandingPage() {
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
       {/* Header */}
       <header className="border-b bg-white/80 backdrop-blur-sm sticky top-0 z-50">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
+        <div className="container mx-auto px-4 py-3 md:py-4 flex items-center justify-between">
           <div className="flex items-center space-x-2">
-            <Brain className="h-8 w-8 text-blue-600" />
-            <span className="text-2xl font-bold text-gray-900">MeetingAI</span>
+            <Brain className={`text-blue-600 ${isMobile ? 'h-7 w-7' : 'h-8 w-8'}`} />
+            <span className={`font-bold text-gray-900 ${isMobile ? 'text-xl' : 'text-2xl'}`}>MeetingAI</span>
             <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-700 border-blue-200">
               Preview
             </Badge>
           </div>
+          
+          {/* Desktop Navigation */}
           <nav className="hidden md:flex items-center space-x-6">
-            <a href="#features" className="text-gray-600 hover:text-gray-900">
+            <a href="#features" className="text-gray-600 hover:text-gray-900 transition-colors">
               Features
             </a>
-            <a href="#pricing" className="text-gray-600 hover:text-gray-900">
+            <a href="#pricing" className="text-gray-600 hover:text-gray-900 transition-colors">
               Pricing
             </a>
             <Button variant="outline" onClick={() => router.push('/auth')}>
               Login
             </Button>
           </nav>
+
+          {/* Mobile Menu Button */}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="md:hidden h-10 w-10 p-0"
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            aria-label="Toggle mobile menu"
+          >
+            <Menu className="h-5 w-5" />
+          </Button>
         </div>
+
+        {/* Mobile Navigation Menu */}
+        {mobileMenuOpen && (
+          <div className="md:hidden border-t bg-white">
+            <nav className="container mx-auto px-4 py-4 space-y-4">
+              <a 
+                href="#features" 
+                className="block text-gray-600 hover:text-gray-900 transition-colors py-2"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                Features
+              </a>
+              <a 
+                href="#pricing" 
+                className="block text-gray-600 hover:text-gray-900 transition-colors py-2"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                Pricing
+              </a>
+              <Button 
+                variant="outline" 
+                className="w-full h-12 mt-4"
+                onClick={() => {
+                  setMobileMenuOpen(false)
+                  router.push('/auth')
+                }}
+              >
+                Login
+              </Button>
+            </nav>
+          </div>
+        )}
       </header>
 
       {/* Hero Section */}
-      <section className="py-20 px-4">
-        <div className="container mx-auto text-center max-w-4xl">
-          <Badge className="mb-4 bg-blue-100 text-blue-800 hover:bg-blue-100">
-            <Zap className="h-4 w-4 mr-1" />
-            Powered by AI
-          </Badge>
-          <h1 className="text-5xl md:text-6xl font-bold text-gray-900 mb-6 leading-tight">
-            Transform Meetings into
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-purple-600">
-              {" "}
-              Actionable Tasks
-            </span>
-            <span className="block">with AI</span>
-          </h1>
-          <p className="text-xl text-gray-600 mb-8 max-w-2xl mx-auto">
-            Stop losing track of meeting decisions. Upload your transcripts and get instant summaries with clear action
-            items, assigned owners, and suggested deadlines.
-          </p>
+      <section className={`px-4 ${isMobile ? 'py-12' : 'py-20'}`}>
+        <ResponsiveContainer maxWidth="2xl" padding={{ mobile: 4, tablet: 6, desktop: 8 }}>
+          <div className="text-center">
+            <Badge className="mb-4 bg-blue-100 text-blue-800 hover:bg-blue-100">
+              <Zap className="h-4 w-4 mr-1" />
+              Powered by AI
+            </Badge>
+            <h1 className={`font-bold text-gray-900 mb-6 leading-tight ${
+              isMobile ? 'text-3xl' : 'text-5xl md:text-6xl'
+            }`}>
+              Transform Meetings into
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-purple-600">
+                {" "}
+                Actionable Tasks
+              </span>
+              <span className="block">with AI</span>
+            </h1>
+            <p className={`text-gray-600 mb-8 max-w-2xl mx-auto ${
+              isMobile ? 'text-lg' : 'text-xl'
+            }`}>
+              Stop losing track of meeting decisions. Upload your transcripts and get instant summaries with clear action
+              items, assigned owners, and suggested deadlines.
+            </p>
 
-          {/* Auth Section */}
-          <Card className="max-w-md mx-auto mb-12 shadow-lg">
+            {/* Auth Section */}
+            <Card className={`mx-auto mb-12 shadow-lg ${isMobile ? 'max-w-sm' : 'max-w-md'}`}>
             <CardHeader>
               <CardTitle>Get Started Today</CardTitle>
               <CardDescription>Join thousands of teams already using MeetingAI</CardDescription>
@@ -248,7 +302,7 @@ export default function LandingPage() {
                   </svg>
                   Continue with Google
                 </Button>
-                
+
                 <Button
                   variant="outline"
                   className="w-full bg-transparent"
@@ -271,25 +325,32 @@ export default function LandingPage() {
             </CardContent>
           </Card>
 
-          {/* Feature Highlights */}
-          <div className="grid md:grid-cols-3 gap-6 max-w-3xl mx-auto">
-            <div className="text-center">
-              <Clock className="h-12 w-12 text-blue-600 mx-auto mb-4" />
-              <h3 className="font-semibold text-lg mb-2">Save Hours</h3>
-              <p className="text-gray-600">Instantly process hour-long meetings into concise summaries</p>
-            </div>
-            <div className="text-center">
-              <Users className="h-12 w-12 text-purple-600 mx-auto mb-4" />
-              <h3 className="font-semibold text-lg mb-2">Boost Accountability</h3>
-              <p className="text-gray-600">Clear action items with suggested owners and deadlines</p>
-            </div>
-            <div className="text-center">
-              <CheckCircle className="h-12 w-12 text-green-600 mx-auto mb-4" />
-              <h3 className="font-semibold text-lg mb-2">Never Miss a Task</h3>
-              <p className="text-gray-600">Comprehensive tracking of all meeting outcomes</p>
+            {/* Feature Highlights */}
+            <div className={`grid gap-6 max-w-3xl mx-auto ${isMobile ? 'grid-cols-1' : 'md:grid-cols-3'}`}>
+              <div className="text-center">
+                <Clock className={`text-blue-600 mx-auto mb-4 ${isMobile ? 'h-10 w-10' : 'h-12 w-12'}`} />
+                <h3 className={`font-semibold mb-2 ${isMobile ? 'text-base' : 'text-lg'}`}>Save Hours</h3>
+                <p className={`text-gray-600 ${isMobile ? 'text-sm' : 'text-base'}`}>
+                  Instantly process hour-long meetings into concise summaries
+                </p>
+              </div>
+              <div className="text-center">
+                <Users className={`text-purple-600 mx-auto mb-4 ${isMobile ? 'h-10 w-10' : 'h-12 w-12'}`} />
+                <h3 className={`font-semibold mb-2 ${isMobile ? 'text-base' : 'text-lg'}`}>Boost Accountability</h3>
+                <p className={`text-gray-600 ${isMobile ? 'text-sm' : 'text-base'}`}>
+                  Clear action items with suggested owners and deadlines
+                </p>
+              </div>
+              <div className="text-center">
+                <CheckCircle className={`text-green-600 mx-auto mb-4 ${isMobile ? 'h-10 w-10' : 'h-12 w-12'}`} />
+                <h3 className={`font-semibold mb-2 ${isMobile ? 'text-base' : 'text-lg'}`}>Never Miss a Task</h3>
+                <p className={`text-gray-600 ${isMobile ? 'text-sm' : 'text-base'}`}>
+                  Comprehensive tracking of all meeting outcomes
+                </p>
+              </div>
             </div>
           </div>
-        </div>
+        </ResponsiveContainer>
       </section>
 
       {/* Features Section */}
@@ -414,7 +475,7 @@ export default function LandingPage() {
                     </p>
                   </div>
                 </div>
-                
+
                 <div className="mt-8 p-4 bg-blue-50 rounded-lg border border-blue-200">
                   <div className="flex items-start space-x-3">
                     <div className="flex-shrink-0">
@@ -425,7 +486,7 @@ export default function LandingPage() {
                     <div>
                       <h5 className="font-semibold text-blue-900 mb-1">Preview Period Benefits</h5>
                       <p className="text-sm text-blue-700">
-                        As a preview user, you'll get lifetime access to premium features at a special discount when we launch. 
+                        As a preview user, you'll get lifetime access to premium features at a special discount when we launch.
                         Your feedback helps us build the perfect meeting AI tool!
                       </p>
                     </div>
@@ -492,7 +553,7 @@ export default function LandingPage() {
                     </div>
                   </div>
                 </div>
-                
+
                 <div className="mt-8">
                   <Button variant="outline" size="lg" className="mr-4">
                     Join Waitlist
@@ -502,12 +563,12 @@ export default function LandingPage() {
                   </Button>
                 </div>
               </div>
-              
+
               <div className="relative">
                 <div className="bg-gradient-to-br from-purple-100 to-blue-100 rounded-2xl p-8 relative overflow-hidden">
                   <div className="absolute top-4 right-4 w-3 h-3 bg-green-400 rounded-full animate-pulse"></div>
                   <div className="absolute top-4 left-4 text-xs text-gray-500">● REC</div>
-                  
+
                   <div className="space-y-4 mt-8">
                     <div className="bg-white rounded-lg p-3 shadow-sm">
                       <div className="flex items-center space-x-2 mb-2">
@@ -517,7 +578,7 @@ export default function LandingPage() {
                       </div>
                       <p className="text-sm text-gray-700">"Let's schedule a follow-up meeting for next Tuesday to review the quarterly results."</p>
                     </div>
-                    
+
                     <div className="bg-white rounded-lg p-3 shadow-sm">
                       <div className="flex items-center space-x-2 mb-2">
                         <div className="w-6 h-6 bg-green-500 rounded-full flex items-center justify-center text-white text-xs font-bold">S</div>
@@ -526,7 +587,7 @@ export default function LandingPage() {
                       </div>
                       <p className="text-sm text-gray-700">"I'll send out the calendar invite and prepare the presentation slides."</p>
                     </div>
-                    
+
                     <div className="bg-purple-50 rounded-lg p-3 border border-purple-200">
                       <div className="flex items-center space-x-2 mb-2">
                         <Brain className="h-4 w-4 text-purple-600" />

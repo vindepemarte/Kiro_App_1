@@ -1,19 +1,109 @@
-import * as React from "react"
+"use client"
 
-const MOBILE_BREAKPOINT = 768
+import { useState, useEffect } from "react"
 
-export function useIsMobile() {
-  const [isMobile, setIsMobile] = React.useState<boolean | undefined>(undefined)
+/**
+ * Hook to detect mobile devices based on screen width
+ * Mobile: < 768px
+ * Tablet: 768px - 1023px  
+ * Desktop: >= 1024px
+ */
+export function useMobile() {
+  const [isMobile, setIsMobile] = useState(false)
 
-  React.useEffect(() => {
-    const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`)
-    const onChange = () => {
-      setIsMobile(window.innerWidth < MOBILE_BREAKPOINT)
+  useEffect(() => {
+    const checkDevice = () => {
+      setIsMobile(window.innerWidth < 768)
     }
-    mql.addEventListener("change", onChange)
-    setIsMobile(window.innerWidth < MOBILE_BREAKPOINT)
-    return () => mql.removeEventListener("change", onChange)
+
+    // Check on mount
+    checkDevice()
+
+    // Listen for resize events
+    window.addEventListener("resize", checkDevice)
+    
+    // Cleanup
+    return () => window.removeEventListener("resize", checkDevice)
   }, [])
 
-  return !!isMobile
+  return isMobile
+}
+
+/**
+ * Hook to detect tablet devices based on screen width
+ */
+export function useTablet() {
+  const [isTablet, setIsTablet] = useState(false)
+
+  useEffect(() => {
+    const checkDevice = () => {
+      const width = window.innerWidth
+      setIsTablet(width >= 768 && width < 1024)
+    }
+
+    checkDevice()
+    window.addEventListener("resize", checkDevice)
+    
+    return () => window.removeEventListener("resize", checkDevice)
+  }, [])
+
+  return isTablet
+}
+
+/**
+ * Hook to get current device type
+ */
+export function useDeviceType() {
+  const [deviceType, setDeviceType] = useState<'mobile' | 'tablet' | 'desktop'>('desktop')
+
+  useEffect(() => {
+    const checkDevice = () => {
+      const width = window.innerWidth
+      if (width < 768) {
+        setDeviceType('mobile')
+      } else if (width < 1024) {
+        setDeviceType('tablet')
+      } else {
+        setDeviceType('desktop')
+      }
+    }
+
+    checkDevice()
+    window.addEventListener("resize", checkDevice)
+    
+    return () => window.removeEventListener("resize", checkDevice)
+  }, [])
+
+  return deviceType
+}
+
+/**
+ * Hook to get responsive breakpoint utilities
+ */
+export function useBreakpoint() {
+  const [breakpoint, setBreakpoint] = useState({
+    isMobile: false,
+    isTablet: false,
+    isDesktop: false,
+    width: 0
+  })
+
+  useEffect(() => {
+    const updateBreakpoint = () => {
+      const width = window.innerWidth
+      setBreakpoint({
+        isMobile: width < 768,
+        isTablet: width >= 768 && width < 1024,
+        isDesktop: width >= 1024,
+        width
+      })
+    }
+
+    updateBreakpoint()
+    window.addEventListener("resize", updateBreakpoint)
+    
+    return () => window.removeEventListener("resize", updateBreakpoint)
+  }, [])
+
+  return breakpoint
 }
