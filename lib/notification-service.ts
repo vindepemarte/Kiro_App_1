@@ -27,6 +27,18 @@ export const notificationService = {
   async getUnreadCount(userId: string): Promise<number> {
     const notifications = await databaseService.getUserNotifications(userId);
     return notifications.filter(n => !n.read).length;
+  },
+  
+  // Add subscribeToNotifications method that the UI expects
+  subscribeToNotifications(userId: string, callback: (notifications: any[]) => void): () => void {
+    try {
+      // Use the database service's subscribeToUserNotifications method
+      return databaseService.subscribeToUserNotifications(userId, callback);
+    } catch (error) {
+      console.error('Error subscribing to notifications:', error);
+      // Return a no-op cleanup function if subscription fails
+      return () => {};
+    }
   }
 };
 
