@@ -345,16 +345,21 @@ export class TaskManagementServiceImpl implements TaskManagementService {
   // Subscribe to real-time user task updates
   subscribeToUserTasks(userId: string, callback: (tasks: TaskWithContext[]) => void): () => void {
     try {
-      // Subscribe to user meetings and extract tasks in real-time
-      const unsubscribeUserMeetings = this.databaseService.subscribeToUserMeetings(userId, async (meetings) => {
+      const unsubscribeFunctions: (() => void)[] = [];
+      
+      // Function to collect and update all user tasks
+      const updateUserTasks = async () => {
         try {
           const userTasks: TaskWithContext[] = [];
           
-          // Get user teams for team meeting context
+          // Get user teams
           const userTeams = await this.databaseService.getUserTeams(userId);
           
+          // Get user meetings
+          const userMeetings = await this.databaseService.getUserMeetings(userId);
+          
           // Extract tasks from user meetings
-          for (const meeting of meetings) {
+          for (const meeting of userMeetings) {
             const meetingTasks = await this.extractTasksFromMeeting(meeting, meeting.teamId);
             const assignedTasks = meetingTasks.filter(task => task.assigneeId === userId);
             userTasks.push(...assignedTasks);
@@ -383,12 +388,49 @@ export class TaskManagementServiceImpl implements TaskManagementService {
           
           callback(sortedTasks);
         } catch (error) {
-          console.error('Error in user tasks subscription:', error);
+          console.error('Error updating user tasks:', error);
           callback([]);
         }
-      });
+      };
 
-      return unsubscribeUserMeetings;
+      // Subscribe to user meetings changes
+      const unsubscribeUserMeetings = this.databaseService.subscribeToUserMeetings(userId, () => {
+        updateUserTasks();
+      });
+      unsubscribeFunctions.push(unsubscribeUserMeetings);
+
+      // Subscribe to user teams changes
+      const unsubscribeUserTeams = this.databaseService.subscribeToUserTeams(userId, async (teams) => {
+        // Subscribe to each team's meetings
+        for (const team of teams) {
+          try {
+            const unsubscribeTeamMeetings = this.databaseService.subscribeToTeamMeetings(team.id, () => {
+              updateUserTasks();
+            });
+            unsubscribeFunctions.push(unsubscribeTeamMeetings);
+          } catch (error) {
+            console.warn(`Failed to subscribe to team ${team.id} meetings:`, error);
+          }
+        }
+        
+        // Update tasks when teams change
+        updateUserTasks();
+      });
+      unsubscribeFunctions.push(unsubscribeUserTeams);
+
+      // Initial load
+      updateUserTasks();
+
+      // Return cleanup function
+      return () => {
+        unsubscribeFunctions.forEach(unsubscribe => {
+          try {
+            unsubscribe();
+          } catch (error) {
+            console.warn('Error unsubscribing from task updates:', error);
+          }
+        });
+      };
     } catch (error) {
       console.error('Failed to subscribe to user tasks:', error);
       return () => {};
