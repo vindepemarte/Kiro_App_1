@@ -582,5 +582,4 @@ export function getTaskManagementService(databaseService: DatabaseService): Task
   return taskManagementServiceInstance;
 }
 
-// Export the implementation class as well
-export { TaskManagementServiceImpl };
+// TaskManagementServiceImpl is already exported above as a class declaration

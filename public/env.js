@@ -9,6 +9,11 @@ window.__ENV = {
   "NEXT_PUBLIC_GEMINI_API_KEY": "demo-gemini-key",
   "NEXT_PUBLIC_GEMINI_MODEL": "gemini-2.0-flash",
   "NEXT_PUBLIC_APP_ID": "meeting-ai-mvp",
+  "NEXT_PUBLIC_LOG_ENDPOINT": "",
+  "NEXT_PUBLIC_ERROR_REPORTING_ENDPOINT": "",
+  "NEXT_PUBLIC_ANALYTICS_ENDPOINT": "",
+  "NEXT_PUBLIC_MONITORING_ENABLED": "true",
+  "NEXT_PUBLIC_LOG_LEVEL": "INFO",
   "NODE_ENV": "production"
 };
 console.log('Environment variables injected:', Object.keys(window.__ENV));

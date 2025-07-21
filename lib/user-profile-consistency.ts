@@ -162,5 +162,6 @@ export function getUserProfileConsistencyService(databaseService: DatabaseServic
   return userProfileServiceInstance;
 }
 
-// Export the implementation class as well
-export { UserProfileConsistencyServiceImpl };
+// Create a default instance for direct import
+import { databaseService } from './database';
+export const userProfileConsistencyService = getUserProfileConsistencyService(databaseService);
