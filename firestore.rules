@@ -17,7 +17,7 @@ service cloud.firestore {
         exists(/databases/$(database)/documents/artifacts/meeting-ai-mvp/teams/$(teamId));
     }
     
-    // Check if user can access team meeting (owner or team member)
+    // Helper function for team meeting access (currently unused but kept for future use)
     function canAccessTeamMeeting(teamId, meetingUserId) {
       return isAuthenticated() && (
         request.auth.uid == meetingUserId || 
