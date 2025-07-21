@@ -226,9 +226,9 @@ export default function Dashboard() {
       let handledError;
       if (error instanceof FileProcessingError) {
         handledError = handleFileError(error)
-      } else if (error?.message?.includes('gemini') || error?.message?.includes('ai')) {
+      } else if (error instanceof Error && (error.message.includes('gemini') || error.message.includes('ai'))) {
         handledError = handleAIError(error)
-      } else if (error?.message?.includes('firestore') || error?.message?.includes('database') || error?.message?.includes('addDoc')) {
+      } else if (error instanceof Error && (error.message.includes('firestore') || error.message.includes('database') || error.message.includes('addDoc'))) {
         handledError = handleDatabaseError(error)
       } else {
         handledError = ErrorHandler.handleError(error, 'File Processing')
@@ -345,17 +345,33 @@ export default function Dashboard() {
     return member?.role === 'admin' && member.status === 'active'
   }
 
+  // Load meetings manually (for refresh after task assignment)
+  const loadMeetings = async () => {
+    if (!user) return
+    
+    try {
+      const userMeetings = await databaseService.getUserMeetings(user.uid)
+      setMeetings(userMeetings)
+    } catch (error) {
+      console.error('Error loading meetings:', error)
+    }
+  }
+
   // Handle task assignment
   const handleTaskAssignment = async (meetingId: string, taskId: string, assigneeId: string) => {
     if (!user) return
     
     try {
       const teamService = getTeamService(databaseService)
-      await databaseService.assignTask(meetingId, taskId, assigneeId, user.uid)
+      // Pass user.uid as both assignedBy and meetingOwnerId
+      await databaseService.assignTask(meetingId, taskId, assigneeId, user.uid, user.uid)
       
       toast.success('Task assigned successfully', {
         title: 'Assignment Complete'
       })
+      
+      // Refresh meetings to show updated task assignments
+      await loadMeetings()
     } catch (error) {
       const handledError = handleDatabaseError(error)
       setMeetingsError(handledError.userMessage)

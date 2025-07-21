@@ -21,6 +21,7 @@ import {
   QuerySnapshot,
   DocumentSnapshot,
   FirestoreError,
+  Firestore,
 } from 'firebase/firestore';
 import { getFirebaseDb } from './firebase';
 import { getAppConfig } from './config';
@@ -276,7 +277,8 @@ class FirestoreService implements DatabaseService {
           // When reading from Firestore, convert Timestamp to Date
           if (item.deadline && typeof item.deadline === 'object' && 'toDate' in item.deadline) {
             try {
-              processedItem.deadline = item.deadline.toDate();
+              // Type assertion to tell TypeScript this is a Firestore Timestamp
+              processedItem.deadline = (item.deadline as any).toDate();
             } catch {
               // If conversion fails, use current date
               processedItem.deadline = new Date();
@@ -355,8 +357,22 @@ class FirestoreService implements DatabaseService {
         const docRef = await addDoc(meetingsCollection, validatedMeetingData);
         const meetingId = docRef.id;
 
-        // Send meeting assignment notifications if assigned to a team
+        // If assigned to a team, also store in team meetings collection
         if (validatedMeetingData.teamId) {
+          try {
+            // Store meeting in team's meetings subcollection
+            const teamMeetingsCollection = collection(this.db, `${this.getTeamsPath()}/${validatedMeetingData.teamId}/meetings`);
+            await addDoc(teamMeetingsCollection, {
+              ...validatedMeetingData,
+              originalMeetingId: meetingId,
+              originalOwnerId: userId,
+            });
+          } catch (teamMeetingError) {
+            console.warn('Failed to store meeting in team collection:', teamMeetingError);
+            // Don't fail the meeting save if team storage fails
+          }
+
+          // Send meeting assignment notifications
           try {
             await this.sendMeetingAssignmentNotifications(meetingId, validatedMeetingData.title, validatedMeetingData.teamId, userId);
           } catch (notificationError) {
@@ -550,42 +566,27 @@ class FirestoreService implements DatabaseService {
   // Get all meetings for a specific team
   async getTeamMeetings(teamId: string): Promise<Meeting[]> {
     try {
-      // We need to search across all user meeting collections for meetings with this teamId
-      // This is a simplified approach - in production, you might want a dedicated team meetings collection
-      const teamsCollection = collection(this.db, this.getTeamsPath());
-      const teamDoc = await getDoc(doc(teamsCollection, teamId));
-      
+      // First, check if team exists
+      const teamDoc = await getDoc(doc(this.db, this.getTeamsPath(), teamId));
       if (!teamDoc.exists()) {
         throw new Error('Team not found');
       }
 
-      const team = this.documentToTeam(teamDoc);
-      if (!team) {
-        throw new Error('Invalid team data');
-      }
+      // Get meetings from the team's meetings subcollection (more efficient)
+      const teamMeetingsCollection = collection(this.db, `${this.getTeamsPath()}/${teamId}/meetings`);
+      const q = query(teamMeetingsCollection, orderBy('createdAt', 'desc'));
+      
+      const querySnapshot = await getDocs(q);
+      const meetings: Meeting[] = [];
 
-      const allMeetings: Meeting[] = [];
-
-      // Get meetings from all team members
-      for (const member of team.members) {
-        if (member.status === 'active') {
-          try {
-            const memberMeetings = await this.getUserMeetings(member.userId);
-            const teamMeetings = memberMeetings.filter(meeting => meeting.teamId === teamId);
-            allMeetings.push(...teamMeetings);
-          } catch (error) {
-            console.warn(`Failed to get meetings for team member ${member.userId}:`, error);
-            // Continue with other members
-          }
+      querySnapshot.forEach((doc) => {
+        const meeting = this.documentToMeeting(doc);
+        if (meeting) {
+          meetings.push(meeting);
         }
-      }
+      });
 
-      // Remove duplicates and sort by creation date
-      const uniqueMeetings = allMeetings.filter((meeting, index, self) => 
-        index === self.findIndex(m => m.id === meeting.id)
-      );
-
-      return uniqueMeetings.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+      return meetings;
     } catch (error) {
       const errorMessage = DatabaseUtils.isFirestoreError(error)
         ? this.handleFirestoreError(error)
@@ -598,116 +599,30 @@ class FirestoreService implements DatabaseService {
   // Subscribe to real-time updates for team meetings
   subscribeToTeamMeetings(teamId: string, callback: (meetings: Meeting[]) => void): Unsubscribe {
     try {
-      let isActive = true;
-      const unsubscribeFunctions: Unsubscribe[] = [];
-      const meetingsMap = new Map<string, Meeting>();
+      // Use the team's meetings subcollection for more efficient real-time updates
+      const teamMeetingsCollection = collection(this.db, `${this.getTeamsPath()}/${teamId}/meetings`);
+      const q = query(teamMeetingsCollection, orderBy('createdAt', 'desc'));
 
-      // Function to update the combined meetings list
-      const updateCombinedMeetings = () => {
-        if (!isActive) return;
-        
-        const allMeetings = Array.from(meetingsMap.values())
-          .filter(meeting => meeting.teamId === teamId)
-          .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
-        
-        callback(allMeetings);
-      };
-
-      // Set up real-time listeners for each team member
-      const setupTeamMemberListeners = async () => {
-        try {
-          const team = await this.getTeamById(teamId);
-          if (!team || !isActive) {
-            callback([]);
-            return;
-          }
-
-          // Subscribe to meetings from each active team member
-          for (const member of team.members) {
-            if (member.status === 'active') {
-              try {
-                const memberMeetingsCollection = collection(this.db, this.getUserMeetingsPath(member.userId));
-                const memberQuery = query(
-                  memberMeetingsCollection,
-                  where('teamId', '==', teamId),
-                  orderBy('createdAt', 'desc')
-                );
-
-                const unsubscribe = onSnapshot(
-                  memberQuery,
-                  (querySnapshot: QuerySnapshot<DocumentData>) => {
-                    if (!isActive) return;
-
-                    // Remove old meetings from this member
-                    const memberMeetingIds = new Set<string>();
-                    
-                    querySnapshot.forEach((doc) => {
-                      const meeting = this.documentToMeeting(doc);
-                      if (meeting && meeting.teamId === teamId) {
-                        meetingsMap.set(doc.id, meeting);
-                        memberMeetingIds.add(doc.id);
-                      }
-                    });
-
-                    // Remove meetings that are no longer in this member's collection
-                    for (const [meetingId, meeting] of meetingsMap.entries()) {
-                      if (meeting.teamId === teamId && !memberMeetingIds.has(meetingId)) {
-                        // Check if this meeting exists in other members' collections
-                        let existsElsewhere = false;
-                        for (const otherMember of team.members) {
-                          if (otherMember.userId !== member.userId && otherMember.status === 'active') {
-                            // This is a simplified check - in a real implementation you might want to verify
-                            existsElsewhere = true;
-                            break;
-                          }
-                        }
-                        if (!existsElsewhere) {
-                          meetingsMap.delete(meetingId);
-                        }
-                      }
-                    }
-
-                    updateCombinedMeetings();
-                  },
-                  (error: FirestoreError) => {
-                    console.error(`Real-time listener error for team member ${member.userId}:`, error);
-                    // Don't fail the entire subscription for one member
-                  }
-                );
-
-                unsubscribeFunctions.push(unsubscribe);
-              } catch (memberError) {
-                console.warn(`Failed to set up listener for team member ${member.userId}:`, memberError);
-                // Continue with other members
-              }
+      return onSnapshot(
+        q,
+        (querySnapshot: QuerySnapshot<DocumentData>) => {
+          const meetings: Meeting[] = [];
+          
+          querySnapshot.forEach((doc) => {
+            const meeting = this.documentToMeeting(doc);
+            if (meeting) {
+              meetings.push(meeting);
             }
-          }
+          });
 
-          // Initial callback with empty array if no listeners were set up
-          if (unsubscribeFunctions.length === 0) {
-            callback([]);
-          }
-        } catch (error) {
-          console.error('Error setting up team member listeners:', error);
+          callback(meetings);
+        },
+        (error: FirestoreError) => {
+          console.error('Real-time team meetings listener error:', error);
+          // Call callback with empty array on error to maintain UI state
           callback([]);
         }
-      };
-
-      // Start setting up listeners
-      setupTeamMemberListeners();
-
-      // Return cleanup function
-      return () => {
-        isActive = false;
-        unsubscribeFunctions.forEach(unsub => {
-          try {
-            unsub();
-          } catch (error) {
-            console.warn('Error during cleanup:', error);
-          }
-        });
-        meetingsMap.clear();
-      };
+      );
     } catch (error) {
       console.error('Failed to set up team meetings listener:', error);
       callback([]);
@@ -994,29 +909,40 @@ class FirestoreService implements DatabaseService {
       // Import notification service dynamically to avoid circular dependencies
       const { notificationService } = await import('./notification-service');
       
-      // Get assignee information from team members
+      // Get assignee information from team members (optimize by using existing data if available)
       let assigneeName = task.assigneeName || 'Unknown';
       if (meeting.teamId) {
-        const team = await this.getTeamById(meeting.teamId);
-        if (team) {
-          const assigneeMember = team.members.find(member => member.userId === task.assigneeId);
-          if (assigneeMember) {
-            assigneeName = assigneeMember.displayName;
+        // Try to avoid extra database call by using cached team data if available
+        try {
+          const team = await this.getTeamById(meeting.teamId);
+          if (team) {
+            const assigneeMember = team.members.find(member => member.userId === task.assigneeId);
+            if (assigneeMember) {
+              assigneeName = assigneeMember.displayName;
+            }
           }
+        } catch (teamError) {
+          console.warn('Could not fetch team data for notification, using fallback name:', teamError);
+          // Continue with fallback name to avoid blocking notification
         }
       }
 
-      // Send task assignment notification
-      await notificationService.sendTaskAssignment({
-        taskId: task.id,
-        taskDescription: task.description,
-        assigneeId: task.assigneeId,
-        assigneeName: assigneeName,
-        meetingTitle: meeting.title,
-        assignedBy: assignedBy,
-      });
+      // Send task assignment notification with error handling
+      try {
+        await notificationService.sendTaskAssignment({
+          taskId: task.id,
+          taskDescription: task.description,
+          assigneeId: task.assigneeId,
+          assigneeName: assigneeName,
+          meetingTitle: meeting.title,
+          assignedBy: assignedBy,
+        });
 
-      console.log(`Sent task assignment notification for task "${task.description}" to ${assigneeName}`);
+        console.log(`Sent task assignment notification for task "${task.description}" to ${assigneeName}`);
+      } catch (notificationError) {
+        console.warn('Failed to send task assignment notification:', notificationError);
+        // Don't throw - notification failure shouldn't break task assignment
+      }
     } catch (error) {
       console.error('Error sending task assignment notifications:', error);
       // Don't throw error to avoid failing the task assignment
@@ -1679,7 +1605,7 @@ export const DatabaseUtils = {
     maxRetries: number = 3,
     baseDelay: number = 1000
   ): Promise<T> {
-    let lastError: Error;
+    let lastError: Error = new Error('Operation failed after retries');
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
