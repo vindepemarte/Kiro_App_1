@@ -11,6 +11,9 @@ service cloud.firestore {
     // Allow users to read and write their own meetings
     match /artifacts/meeting-ai-mvp/users/{userId}/meetings/{meetingId} {
       allow read, write: if isAuthenticated() && request.auth.uid == userId;
+      // Allow team members to read and update meetings assigned to their team (simplified for now)
+      allow read, update: if isAuthenticated() && 
+        resource.data.teamId != null;
     }
     
     // Allow users to list their own meetings

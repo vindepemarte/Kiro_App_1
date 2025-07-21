@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useMemo, useRef, useCallback } from "react"
 import { useAuth } from "@/contexts/auth-context"
 import { useRouter } from "next/navigation"
 import { databaseService } from "@/lib/database"
@@ -49,6 +49,11 @@ export default function TasksPage() {
   const [filterBy, setFilterBy] = useState<FilterOption>('all')
   const [selectedTeam, setSelectedTeam] = useState<string>('all')
   const [isClient, setIsClient] = useState(false)
+  
+  // Use refs to prevent infinite loops
+  const loadingRef = useRef(false)
+  const teamsLoadedRef = useRef(false)
+  const lastTeamsLengthRef = useRef(0)
 
   // Ensure client-side only rendering
   useEffect(() => {
@@ -62,7 +67,71 @@ export default function TasksPage() {
     }
   }, [user, loading, router])
 
-  // Load user teams
+  // Memoized function to load tasks
+  const loadTasks = useCallback(async (userTeams: Team[]) => {
+    if (!user || loadingRef.current) return
+    
+    loadingRef.current = true
+    setTasksLoading(true)
+
+    try {
+      // Get all user meetings first
+      const userMeetings = await databaseService.getUserMeetings(user.uid)
+      
+      // Get all team meetings for teams user is part of (only if teams exist)
+      let teamMeetings: Meeting[] = []
+      if (userTeams.length > 0) {
+        const teamMeetingsPromises = userTeams.map(async (team) => {
+          try {
+            return await databaseService.getTeamMeetings(team.id)
+          } catch (error) {
+            console.warn(`Failed to load meetings for team ${team.name}:`, error)
+            return []
+          }
+        })
+
+        const teamMeetingsArrays = await Promise.all(teamMeetingsPromises)
+        teamMeetings = teamMeetingsArrays.flat()
+      }
+
+      // Combine and deduplicate meetings
+      const allMeetings = [...userMeetings, ...teamMeetings]
+      const uniqueMeetings = allMeetings.filter((meeting, index, self) => 
+        index === self.findIndex(m => m.id === meeting.id)
+      )
+
+      // Extract tasks assigned to current user
+      const userTasks: TaskWithMeeting[] = []
+      
+      uniqueMeetings.forEach(meeting => {
+        meeting.actionItems.forEach(task => {
+          if (task.assigneeId === user.uid) {
+            const teamInfo = userTeams.find(t => t.id === meeting.teamId)
+            userTasks.push({
+              ...task,
+              meetingId: meeting.id,
+              meetingTitle: meeting.title,
+              meetingDate: meeting.date,
+              teamId: meeting.teamId,
+              teamName: teamInfo?.name
+            })
+          }
+        })
+      })
+
+      setTasks(userTasks)
+    } catch (error) {
+      console.error('Error loading tasks:', error)
+      toast.error('Failed to load tasks', {
+        title: 'Loading Error'
+      })
+    } finally {
+      setTasksLoading(false)
+      loadingRef.current = false
+    }
+  }, [user, toast])
+
+  // Load user teams and tasks
   useEffect(() => {
     if (!user) return
 
@@ -70,72 +139,18 @@ export default function TasksPage() {
       user.uid,
       (userTeams) => {
         setTeams(userTeams)
+        
+        // Only load tasks if teams have changed or this is the first load
+        if (!teamsLoadedRef.current || userTeams.length !== lastTeamsLengthRef.current) {
+          teamsLoadedRef.current = true
+          lastTeamsLengthRef.current = userTeams.length
+          loadTasks(userTeams)
+        }
       }
     )
 
     return unsubscribe
-  }, [user])
-
-  // Load user tasks from all meetings
-  useEffect(() => {
-    if (!user) return
-
-    setTasksLoading(true)
-
-    const loadTasks = async () => {
-      try {
-        // Get all user meetings
-        const userMeetings = await databaseService.getUserMeetings(user.uid)
-        
-        // Get all team meetings for teams user is part of
-        const teamMeetings: Meeting[] = []
-        for (const team of teams) {
-          try {
-            const meetings = await databaseService.getTeamMeetings(team.id)
-            teamMeetings.push(...meetings)
-          } catch (error) {
-            console.warn(`Failed to load meetings for team ${team.name}:`, error)
-          }
-        }
-
-        // Combine and deduplicate meetings
-        const allMeetings = [...userMeetings, ...teamMeetings]
-        const uniqueMeetings = allMeetings.filter((meeting, index, self) => 
-          index === self.findIndex(m => m.id === meeting.id)
-        )
-
-        // Extract tasks assigned to current user
-        const userTasks: TaskWithMeeting[] = []
-        
-        uniqueMeetings.forEach(meeting => {
-          meeting.actionItems.forEach(task => {
-            if (task.assigneeId === user.uid) {
-              const teamInfo = teams.find(t => t.id === meeting.teamId)
-              userTasks.push({
-                ...task,
-                meetingId: meeting.id,
-                meetingTitle: meeting.title,
-                meetingDate: meeting.date,
-                teamId: meeting.teamId,
-                teamName: teamInfo?.name
-              })
-            }
-          })
-        })
-
-        setTasks(userTasks)
-      } catch (error) {
-        console.error('Error loading tasks:', error)
-        toast.error('Failed to load tasks', {
-          title: 'Loading Error'
-        })
-      } finally {
-        setTasksLoading(false)
-      }
-    }
-
-    loadTasks()
-  }, [user, teams, toast])
+  }, [user?.uid]) // Only depend on user ID
 
   // Handle task status update
   const handleTaskStatusUpdate = async (taskId: string, meetingId: string, newStatus: ActionItem['status']) => {
