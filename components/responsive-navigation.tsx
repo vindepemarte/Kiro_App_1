@@ -4,10 +4,11 @@ import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
 import { Badge } from "@/components/ui/badge"
-import { Brain, Menu, User, LogOut, Home, BarChart3, Settings, Bell, Users } from "lucide-react"
+import { Brain, Menu, User, LogOut, Home, BarChart3, Settings, Bell, Users, CheckSquare } from "lucide-react"
 import { useAuth } from "@/contexts/auth-context"
 import { useMobile } from "@/hooks/use-mobile"
 import { NotificationCenter, useNotificationCount } from "@/components/notification-center"
+import { useTaskCount } from "@/hooks/use-task-count"
 
 interface ResponsiveNavigationProps {
   currentPage?: string
@@ -25,6 +26,7 @@ export function ResponsiveNavigation({
   const [isOpen, setIsOpen] = useState(false)
   const [notificationCenterOpen, setNotificationCenterOpen] = useState(false)
   const unreadCount = useNotificationCount()
+  const { pendingTaskCount } = useTaskCount()
 
   // Close mobile menu when screen size changes to desktop
   useEffect(() => {
@@ -37,7 +39,7 @@ export function ResponsiveNavigation({
     { id: "dashboard", label: "Dashboard", icon: Home, href: "/dashboard" },
     { id: "teams", label: "Teams", icon: Users, href: "/teams" },
     { id: "analytics", label: "Analytics", icon: BarChart3, href: "/analytics" },
-    { id: "notifications", label: "Notifications", icon: Bell, href: "/notifications" },
+    { id: "tasks", label: "Tasks", icon: CheckSquare, href: "/tasks" },
     { id: "settings", label: "Settings", icon: Settings, href: "/settings" },
   ]
 
@@ -142,13 +144,21 @@ export function ResponsiveNavigation({
                           <Button
                             key={item.id}
                             variant={isActive ? "default" : "ghost"}
-                            className={`w-full justify-start h-14 text-left text-base min-h-[44px] ${
+                            className={`w-full justify-start h-14 text-left text-base min-h-[44px] relative ${
                               isActive ? "bg-blue-600 text-white shadow-sm" : "text-gray-700 hover:bg-gray-100"
                             }`}
                             onClick={() => handleNavigation(item.href)}
                           >
                             <Icon className="h-5 w-5 mr-4 flex-shrink-0" />
                             <span className="truncate">{item.label}</span>
+                            {item.id === 'tasks' && pendingTaskCount > 0 && (
+                              <Badge 
+                                variant="destructive" 
+                                className="absolute right-2 h-5 w-5 p-0 text-xs flex items-center justify-center"
+                              >
+                                {pendingTaskCount > 99 ? '99+' : pendingTaskCount}
+                              </Badge>
+                            )}
                           </Button>
                         )
                       })}
@@ -177,23 +187,50 @@ export function ResponsiveNavigation({
         <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-40 pb-safe"
              style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
           <div className="flex items-center justify-around px-2 py-2">
-            {navigationItems.slice(0, 3).map((item) => {
-              const Icon = item.icon
-              const isActive = currentPage === item.id
-              return (
-                <Button
-                  key={item.id}
-                  variant="ghost"
-                  className={`flex-1 flex-col h-16 min-h-[44px] px-2 py-2 ${
-                    isActive ? "text-blue-600 bg-blue-50" : "text-gray-600"
-                  }`}
-                  onClick={() => handleNavigation(item.href)}
+            {/* Dashboard */}
+            <Button
+              variant="ghost"
+              className={`flex-1 flex-col h-16 min-h-[44px] px-2 py-2 ${
+                currentPage === "dashboard" ? "text-blue-600 bg-blue-50" : "text-gray-600"
+              }`}
+              onClick={() => handleNavigation("/dashboard")}
+            >
+              <Home className="h-5 w-5 mb-1" />
+              <span className="text-xs truncate">Dashboard</span>
+            </Button>
+            
+            {/* Teams */}
+            <Button
+              variant="ghost"
+              className={`flex-1 flex-col h-16 min-h-[44px] px-2 py-2 ${
+                currentPage === "teams" ? "text-blue-600 bg-blue-50" : "text-gray-600"
+              }`}
+              onClick={() => handleNavigation("/teams")}
+            >
+              <Users className="h-5 w-5 mb-1" />
+              <span className="text-xs truncate">Teams</span>
+            </Button>
+
+            {/* Tasks */}
+            <Button
+              variant="ghost"
+              className={`flex-1 flex-col h-16 min-h-[44px] px-2 py-2 relative ${
+                currentPage === "tasks" ? "text-blue-600 bg-blue-50" : "text-gray-600"
+              }`}
+              onClick={() => handleNavigation("/tasks")}
+            >
+              <CheckSquare className="h-5 w-5 mb-1" />
+              <span className="text-xs truncate">Tasks</span>
+              {pendingTaskCount > 0 && (
+                <Badge 
+                  variant="destructive" 
+                  className="absolute top-1 right-2 h-4 w-4 p-0 text-xs flex items-center justify-center"
                 >
-                  <Icon className="h-5 w-5 mb-1" />
-                  <span className="text-xs truncate">{item.label}</span>
-                </Button>
-              )
-            })}
+                  {pendingTaskCount > 9 ? '9+' : pendingTaskCount}
+                </Badge>
+              )}
+            </Button>
+            
             {/* Notification button in bottom nav */}
             <Button
               variant="ghost"
@@ -213,6 +250,7 @@ export function ResponsiveNavigation({
                 </Badge>
               )}
             </Button>
+            
             {/* More button for additional items */}
             <Button
               variant="ghost"
@@ -257,11 +295,19 @@ export function ResponsiveNavigation({
                 <Button
                   key={item.id}
                   variant={isActive ? "default" : "ghost"}
-                  className={`h-10 ${isActive ? "bg-blue-600 text-white" : "text-gray-700"}`}
+                  className={`h-10 relative ${isActive ? "bg-blue-600 text-white" : "text-gray-700"}`}
                   onClick={() => handleNavigation(item.href)}
                 >
                   <Icon className="h-4 w-4 mr-2" />
                   {item.label}
+                  {item.id === 'tasks' && pendingTaskCount > 0 && (
+                    <Badge 
+                      variant="destructive" 
+                      className="absolute -top-1 -right-1 h-4 w-4 p-0 text-xs flex items-center justify-center"
+                    >
+                      {pendingTaskCount > 99 ? '99+' : pendingTaskCount}
+                    </Badge>
+                  )}
                 </Button>
               )
             })}
