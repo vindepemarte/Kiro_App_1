@@ -6,21 +6,14 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Progress } from '@/components/ui/progress';
 import { 
-  Activity, 
   AlertTriangle, 
   CheckCircle, 
   Clock, 
-  Database, 
-  Globe, 
-  Memory, 
   Monitor, 
   RefreshCw, 
   TrendingUp,
-  XCircle,
-  Zap
-} from 'lucide-react';
+  XCircle} from 'lucide-react';
 
 import healthMonitor, { SystemHealth } from '@/lib/health-monitor';
 import performanceMonitor, { PerformanceReport } from '@/lib/performance-monitor';
@@ -50,7 +43,7 @@ export function ProductionMonitor() {
 
       setData({ health, performance, errors, logs });
     } catch (error) {
-      logger.error('Failed to fetch monitoring data', error, 'production-monitor');
+      logger.error('Failed to fetch monitoring data', error instanceof Error ? error : undefined, 'production-monitor');
     } finally {
       setLoading(false);
     }

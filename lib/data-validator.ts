@@ -83,13 +83,22 @@ class DataValidatorImpl implements DataValidator {
   validateMeetingData(meeting: ProcessedMeeting, teamId?: string): ValidatedMeetingData {
     const now = Timestamp.fromDate(new Date());
     
+    // Limit transcript size to prevent quota issues (max 500KB)
+    const MAX_TRANSCRIPT_SIZE = 100 * 1024; // 100KB
+    let rawTranscript = meeting.rawTranscript || '';
+    
+    if (rawTranscript.length > MAX_TRANSCRIPT_SIZE) {
+      console.warn(`Transcript too large (${rawTranscript.length} chars), truncating to ${MAX_TRANSCRIPT_SIZE} chars`);
+      rawTranscript = rawTranscript.substring(0, MAX_TRANSCRIPT_SIZE) + '\n\n[Transcript truncated due to size limits]';
+    }
+    
     // Create base meeting data with required fields
     const validatedData: ValidatedMeetingData = {
-      title: meeting.title || this.generateMeetingTitle(meeting.rawTranscript, meeting.summary),
+      title: meeting.title || this.generateMeetingTitle(rawTranscript, meeting.summary),
       date: meeting.date ? Timestamp.fromDate(new Date(meeting.date)) : now,
       summary: meeting.summary || '',
       actionItems: this.validateActionItems(meeting.actionItems || []),
-      rawTranscript: meeting.rawTranscript || '',
+      rawTranscript: rawTranscript,
       createdAt: now,
       updatedAt: now,
       metadata: {

@@ -39,6 +39,94 @@ export const notificationService = {
       // Return a no-op cleanup function if subscription fails
       return () => {};
     }
+  },
+
+  // Add the missing methods that the database service is trying to call
+  async sendMeetingAssignment(
+    meetingId: string,
+    meetingTitle: string,
+    teamId: string,
+    teamName: string,
+    assignedBy: string,
+    assignedByName: string
+  ): Promise<void> {
+    return await notificationManagementService.sendMeetingAssignmentNotification(
+      meetingId,
+      meetingTitle,
+      teamId,
+      teamName,
+      assignedBy,
+      assignedByName
+    );
+  },
+
+  async sendTaskAssignment(
+    taskId: string,
+    taskDescription: string,
+    assigneeId: string,
+    assigneeName: string,
+    meetingTitle: string,
+    assignedBy: string,
+    teamId?: string,
+    teamName?: string
+  ): Promise<void> {
+    return await notificationManagementService.sendTaskAssignmentNotification(
+      taskId,
+      taskDescription,
+      assigneeId,
+      assigneeName,
+      meetingTitle,
+      assignedBy,
+      teamId,
+      teamName
+    );
+  },
+
+  async sendMeetingUpdate(
+    meetingId: string,
+    meetingTitle: string,
+    teamId: string,
+    updatedBy: string,
+    updateType: string
+  ): Promise<void> {
+    // Get team information
+    const team = await databaseService.getTeamById(teamId);
+    if (!team) {
+      console.warn(`Team ${teamId} not found for meeting update notifications`);
+      return;
+    }
+
+    // Get updater information
+    const updaterProfile = await databaseService.getUserProfile(updatedBy);
+    const updaterName = updaterProfile?.displayName || 'Team member';
+
+    // Get active team members (excluding the person who updated the meeting)
+    const activeMembers = team.members.filter(member => 
+      member.status === 'active' && member.userId !== updatedBy
+    );
+
+    if (activeMembers.length === 0) {
+      console.log('No active team members to notify for meeting update');
+      return;
+    }
+
+    // Create notifications for all active team members
+    const notifications = activeMembers.map(member => ({
+      userId: member.userId,
+      type: 'meeting_update' as const,
+      title: `Meeting Updated: ${meetingTitle}`,
+      message: `${updaterName} has updated the meeting "${meetingTitle}" in team "${team.name}".`,
+      data: {
+        meetingId: meetingId,
+        meetingTitle: meetingTitle,
+        teamId: teamId,
+        teamName: team.name
+      }
+    }));
+
+    // Send notifications in batch
+    await notificationManagementService.sendBulkNotifications(notifications);
+    console.log(`Meeting update notifications sent to ${activeMembers.length} team members`);
   }
 };
 
