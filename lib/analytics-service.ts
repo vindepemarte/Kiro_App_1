@@ -402,5 +402,4 @@ export function getAnalyticsService(
   return analyticsServiceInstance;
 }
 
-// Export the implementation class as well
-export { AnalyticsServiceImpl };
+// AnalyticsServiceImpl is already exported above as a class declaration

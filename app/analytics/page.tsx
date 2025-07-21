@@ -20,15 +20,16 @@ import {
   Target,
   Activity
 } from "lucide-react"
-import { Meeting, Team } from "@/lib/types"
+import { Meeting, Team, AnalyticsData } from "@/lib/types"
 import { databaseService } from "@/lib/database"
+import { taskService } from "@/lib/task-service"
+import { getAnalyticsService } from "@/lib/analytics-service"
 import { authService } from "@/lib/auth"
 
 export default function AnalyticsPage() {
   const { user, loading, error } = useAuth()
   const router = useRouter()
-  const [meetings, setMeetings] = useState<Meeting[]>([])
-  const [teams, setTeams] = useState<Team[]>([])
+  const [analyticsData, setAnalyticsData] = useState<AnalyticsData | null>(null)
   const [dataLoading, setDataLoading] = useState(true)
   const [dataError, setDataError] = useState<string | null>(null)
 
@@ -39,11 +40,10 @@ export default function AnalyticsPage() {
     }
   }, [user, loading, router])
 
-  // Load user data
+  // Load analytics data using the comprehensive analytics service
   useEffect(() => {
     if (!user) {
-      setMeetings([])
-      setTeams([])
+      setAnalyticsData(null)
       setDataLoading(false)
       return
     }
@@ -52,30 +52,31 @@ export default function AnalyticsPage() {
     setDataError(null)
 
     try {
-      // Load meetings
-      const unsubscribeMeetings = databaseService.subscribeToUserMeetings(
-        user.uid,
-        (userMeetings) => {
-          setMeetings(userMeetings)
-        }
-      )
-
-      // Load teams
-      const unsubscribeTeams = databaseService.subscribeToUserTeams(
-        user.uid,
-        (userTeams) => {
-          setTeams(userTeams)
+      // Create analytics service instance
+      const analyticsService = getAnalyticsService(databaseService, taskService)
+      
+      // Load initial analytics data
+      analyticsService.getUserAnalytics(user.uid)
+        .then(analytics => {
+          setAnalyticsData(analytics)
           setDataLoading(false)
-        }
-      )
+        })
+        .catch(error => {
+          console.error('Error loading analytics data:', error)
+          setDataError('Failed to load analytics data')
+          setDataLoading(false)
+        })
 
-      return () => {
-        unsubscribeMeetings()
-        unsubscribeTeams()
-      }
+      // Subscribe to real-time analytics updates
+      const unsubscribe = analyticsService.subscribeToAnalytics(user.uid, (analytics) => {
+        setAnalyticsData(analytics)
+        setDataLoading(false)
+      })
+
+      return unsubscribe
     } catch (error) {
-      console.error('Error loading analytics data:', error)
-      setDataError('Failed to load analytics data')
+      console.error('Error setting up analytics:', error)
+      setDataError('Failed to initialize analytics')
       setDataLoading(false)
     }
   }, [user])
@@ -89,32 +90,30 @@ export default function AnalyticsPage() {
     }
   }
 
-  // Calculate analytics
-  const analytics = {
-    totalMeetings: meetings.length,
-    personalMeetings: meetings.filter(m => !m.teamId).length,
-    teamMeetings: meetings.filter(m => m.teamId).length,
-    totalTasks: meetings.reduce((sum, m) => sum + (m.actionItems?.length || 0), 0),
-    completedTasks: meetings.reduce((sum, m) => 
-      sum + (m.actionItems?.filter(item => item.status === 'completed').length || 0), 0),
-    pendingTasks: meetings.reduce((sum, m) => 
-      sum + (m.actionItems?.filter(item => item.status === 'pending').length || 0), 0),
-    inProgressTasks: meetings.reduce((sum, m) => 
-      sum + (m.actionItems?.filter(item => item.status === 'in_progress').length || 0), 0),
-    myTasks: meetings.reduce((sum, m) => 
-      sum + (m.actionItems?.filter(item => item.assigneeId === user?.uid).length || 0), 0),
-    thisMonth: meetings.filter(m => {
-      const now = new Date()
-      const meetingDate = new Date(m.date)
-      return meetingDate.getMonth() === now.getMonth() && 
-             meetingDate.getFullYear() === now.getFullYear()
-    }).length,
+  // Use analytics data from the comprehensive analytics service
+  const analytics = analyticsData ? {
+    totalMeetings: analyticsData.totalMeetings,
+    personalMeetings: analyticsData.totalMeetings - analyticsData.teamMeetings,
+    teamMeetings: analyticsData.teamMeetings,
+    totalTasks: analyticsData.totalTasks,
+    completedTasks: analyticsData.completedTasks,
+    pendingTasks: analyticsData.pendingTasks,
+    inProgressTasks: analyticsData.totalTasks - analyticsData.completedTasks - analyticsData.pendingTasks,
+    myTasks: analyticsData.totalTasks, // All tasks in user analytics are assigned to the user
+    thisMonth: analyticsData.meetingsThisMonth,
+    completionRate: analyticsData.completionRate
+  } : {
+    totalMeetings: 0,
+    personalMeetings: 0,
+    teamMeetings: 0,
+    totalTasks: 0,
+    completedTasks: 0,
+    pendingTasks: 0,
+    inProgressTasks: 0,
+    myTasks: 0,
+    thisMonth: 0,
     completionRate: 0
   }
-
-  analytics.completionRate = analytics.totalTasks > 0 
-    ? Math.round((analytics.completedTasks / analytics.totalTasks) * 100)
-    : 0
 
   // Show loading screen
   if (loading) {
@@ -308,7 +307,7 @@ export default function AnalyticsPage() {
               </Card>
 
               {/* Team Analytics */}
-              {teams.length > 0 && (
+              {analyticsData && analyticsData.totalTeams > 0 && (
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
@@ -320,34 +319,32 @@ export default function AnalyticsPage() {
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <div className="space-y-4">
-                      {teams.map(team => {
-                        const teamMeetings = meetings.filter(m => m.teamId === team.id)
-                        const teamTasks = teamMeetings.reduce((sum, m) => sum + (m.actionItems?.length || 0), 0)
-                        const teamCompleted = teamMeetings.reduce((sum, m) => 
-                          sum + (m.actionItems?.filter(item => item.status === 'completed').length || 0), 0)
-                        const teamCompletionRate = teamTasks > 0 ? Math.round((teamCompleted / teamTasks) * 100) : 0
-
-                        return (
-                          <div key={team.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-                            <div className="flex items-center gap-3">
-                              <div className="h-10 w-10 bg-blue-100 rounded-full flex items-center justify-center">
-                                <Users className="h-5 w-5 text-blue-600" />
-                              </div>
-                              <div>
-                                <p className="font-semibold text-gray-900">{team.name}</p>
-                                <p className="text-sm text-gray-600">
-                                  {teamMeetings.length} meetings, {teamTasks} tasks
-                                </p>
-                              </div>
-                            </div>
-                            <div className="text-right">
-                              <div className="text-lg font-bold text-green-600">{teamCompletionRate}%</div>
-                              <p className="text-sm text-gray-600">completion rate</p>
-                            </div>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="flex items-center justify-between p-4 bg-blue-50 rounded-lg border border-blue-200">
+                        <div className="flex items-center gap-3">
+                          <Users className="h-8 w-8 text-blue-600" />
+                          <div>
+                            <p className="font-semibold text-blue-900">Total Teams</p>
+                            <p className="text-sm text-blue-700">{analyticsData.totalTeams} teams</p>
                           </div>
-                        )
-                      })}
+                        </div>
+                        <Badge variant="secondary" className="bg-blue-100 text-blue-800">
+                          {analyticsData.activeTeams} active
+                        </Badge>
+                      </div>
+
+                      <div className="flex items-center justify-between p-4 bg-green-50 rounded-lg border border-green-200">
+                        <div className="flex items-center gap-3">
+                          <Target className="h-8 w-8 text-green-600" />
+                          <div>
+                            <p className="font-semibold text-green-900">Team Tasks</p>
+                            <p className="text-sm text-green-700">{analyticsData.teamTasks} tasks</p>
+                          </div>
+                        </div>
+                        <Badge variant="secondary" className="bg-green-100 text-green-800">
+                          {analyticsData.teamMeetings} meetings
+                        </Badge>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
