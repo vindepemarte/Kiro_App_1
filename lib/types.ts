@@ -158,6 +158,27 @@ export interface TaskAssignmentData {
   assignedBy: string;
 }
 
+export interface TaskWithContext extends ActionItem {
+  // Core task information inherited from ActionItem
+  
+  // Assignment information
+  assigneeId: string;
+  assigneeName: string;
+  assignedBy?: string;
+  assignedAt?: Date;
+  
+  // Context information
+  meetingId: string;
+  meetingTitle: string;
+  meetingDate: Date;
+  teamId?: string;
+  teamName?: string;
+  
+  // Metadata
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface MeetingAssignmentData {
   meetingId: string;
   meetingTitle: string;

@@ -38,8 +38,8 @@ export function ResponsiveNavigation({
   const navigationItems = [
     { id: "dashboard", label: "Dashboard", icon: Home, href: "/dashboard" },
     { id: "teams", label: "Teams", icon: Users, href: "/teams" },
-    { id: "analytics", label: "Analytics", icon: BarChart3, href: "/analytics" },
     { id: "tasks", label: "Tasks", icon: CheckSquare, href: "/tasks" },
+    { id: "analytics", label: "Analytics", icon: BarChart3, href: "/analytics" },
     { id: "settings", label: "Settings", icon: Settings, href: "/settings" },
   ]
 
@@ -74,111 +74,30 @@ export function ResponsiveNavigation({
               </Badge>
             </div>
 
-            {/* Mobile Actions */}
+            {/* Mobile Actions - User Info Only */}
             <div className="flex items-center space-x-2">
-              {/* Notification Button */}
+              {user && (
+                <div className="flex items-center space-x-2 text-sm text-gray-600">
+                  <User className="h-4 w-4" />
+                  <span className="truncate max-w-24">
+                    {user.isAnonymous 
+                      ? 'Anonymous' 
+                      : user.displayName?.split(' ')[0] || user.email?.split('@')[0] || 'User'
+                    }
+                  </span>
+                </div>
+              )}
+              
+              {/* Logout Button */}
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-12 w-12 p-0 min-h-[44px] min-w-[44px] relative"
-                onClick={() => setNotificationCenterOpen(true)}
-                aria-label="Open notifications"
+                className="h-10 px-3 text-gray-600"
+                onClick={handleLogoutClick}
+                aria-label="Logout"
               >
-                <Bell className="h-6 w-6" />
-                {unreadCount > 0 && (
-                  <Badge 
-                    variant="destructive" 
-                    className="absolute -top-1 -right-1 h-5 w-5 p-0 text-xs flex items-center justify-center"
-                  >
-                    {unreadCount > 99 ? '99+' : unreadCount}
-                  </Badge>
-                )}
+                <LogOut className="h-4 w-4" />
               </Button>
-
-              {/* Mobile Menu */}
-              <Sheet open={isOpen} onOpenChange={setIsOpen}>
-                <SheetTrigger asChild>
-                  <Button 
-                    variant="ghost" 
-                    size="sm" 
-                    className="h-12 w-12 p-0 min-h-[44px] min-w-[44px]"
-                    aria-label="Open navigation menu"
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault()
-                        setIsOpen(true)
-                      }
-                    }}
-                  >
-                    <Menu className="h-6 w-6" />
-                  </Button>
-                </SheetTrigger>
-                <SheetContent side="right" className="w-full max-w-sm p-0">
-                <div className="flex flex-col h-full">
-                  {/* Header */}
-                  <div className="p-6 border-b bg-gray-50">
-                    <div className="flex items-center space-x-2 mb-4">
-                      <Brain className="h-6 w-6 text-blue-600" />
-                      <span className="text-lg font-bold text-gray-900">MeetingAI</span>
-                    </div>
-                    {user && (
-                      <div className="flex items-center space-x-2 text-sm text-gray-600">
-                        <User className="h-4 w-4" />
-                        <span className="truncate">
-                          {user.isAnonymous 
-                            ? 'Anonymous User' 
-                            : user.displayName || user.email || `User ${user.uid.slice(0, 8)}`
-                          }
-                        </span>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Navigation Items */}
-                  <nav className="flex-1 p-4">
-                    <div className="space-y-1">
-                      {navigationItems.map((item) => {
-                        const Icon = item.icon
-                        const isActive = currentPage === item.id
-                        return (
-                          <Button
-                            key={item.id}
-                            variant={isActive ? "default" : "ghost"}
-                            className={`w-full justify-start h-14 text-left text-base min-h-[44px] relative ${
-                              isActive ? "bg-blue-600 text-white shadow-sm" : "text-gray-700 hover:bg-gray-100"
-                            }`}
-                            onClick={() => handleNavigation(item.href)}
-                          >
-                            <Icon className="h-5 w-5 mr-4 flex-shrink-0" />
-                            <span className="truncate">{item.label}</span>
-                            {item.id === 'tasks' && pendingTaskCount > 0 && (
-                              <Badge 
-                                variant="destructive" 
-                                className="absolute right-2 h-5 w-5 p-0 text-xs flex items-center justify-center"
-                              >
-                                {pendingTaskCount > 99 ? '99+' : pendingTaskCount}
-                              </Badge>
-                            )}
-                          </Button>
-                        )
-                      })}
-                    </div>
-                  </nav>
-
-                  {/* Footer */}
-                  <div className="p-4 border-t bg-gray-50">
-                    <Button
-                      variant="outline"
-                      className="w-full h-14 justify-start text-gray-700 text-base min-h-[44px] border-gray-300"
-                      onClick={handleLogoutClick}
-                    >
-                      <LogOut className="h-5 w-5 mr-4 flex-shrink-0" />
-                      <span>Logout</span>
-                    </Button>
-                  </div>
-                </div>
-                </SheetContent>
-              </Sheet>
             </div>
           </div>
         </header>
@@ -186,79 +105,93 @@ export function ResponsiveNavigation({
         {/* Bottom Navigation for Mobile */}
         <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-40 pb-safe"
              style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
-          <div className="flex items-center justify-around px-2 py-2">
+          <div className="grid grid-cols-6 gap-1 px-1 py-2">
             {/* Dashboard */}
             <Button
               variant="ghost"
-              className={`flex-1 flex-col h-16 min-h-[44px] px-2 py-2 ${
+              className={`flex-col h-16 min-h-[44px] px-1 py-2 ${
                 currentPage === "dashboard" ? "text-blue-600 bg-blue-50" : "text-gray-600"
               }`}
               onClick={() => handleNavigation("/dashboard")}
             >
-              <Home className="h-5 w-5 mb-1" />
+              <Home className="h-4 w-4 mb-1" />
               <span className="text-xs truncate">Dashboard</span>
             </Button>
             
             {/* Teams */}
             <Button
               variant="ghost"
-              className={`flex-1 flex-col h-16 min-h-[44px] px-2 py-2 ${
+              className={`flex-col h-16 min-h-[44px] px-1 py-2 ${
                 currentPage === "teams" ? "text-blue-600 bg-blue-50" : "text-gray-600"
               }`}
               onClick={() => handleNavigation("/teams")}
             >
-              <Users className="h-5 w-5 mb-1" />
+              <Users className="h-4 w-4 mb-1" />
               <span className="text-xs truncate">Teams</span>
             </Button>
 
             {/* Tasks */}
             <Button
               variant="ghost"
-              className={`flex-1 flex-col h-16 min-h-[44px] px-2 py-2 relative ${
+              className={`flex-col h-16 min-h-[44px] px-1 py-2 relative ${
                 currentPage === "tasks" ? "text-blue-600 bg-blue-50" : "text-gray-600"
               }`}
               onClick={() => handleNavigation("/tasks")}
             >
-              <CheckSquare className="h-5 w-5 mb-1" />
+              <CheckSquare className="h-4 w-4 mb-1" />
               <span className="text-xs truncate">Tasks</span>
               {pendingTaskCount > 0 && (
                 <Badge 
                   variant="destructive" 
-                  className="absolute top-1 right-2 h-4 w-4 p-0 text-xs flex items-center justify-center"
+                  className="absolute top-1 right-1 h-3 w-3 p-0 text-xs flex items-center justify-center"
                 >
                   {pendingTaskCount > 9 ? '9+' : pendingTaskCount}
                 </Badge>
               )}
             </Button>
-            
-            {/* Notification button in bottom nav */}
+
+            {/* Analytics */}
             <Button
               variant="ghost"
-              className={`flex-1 flex-col h-16 min-h-[44px] px-2 py-2 relative ${
+              className={`flex-col h-16 min-h-[44px] px-1 py-2 ${
+                currentPage === "analytics" ? "text-blue-600 bg-blue-50" : "text-gray-600"
+              }`}
+              onClick={() => handleNavigation("/analytics")}
+            >
+              <BarChart3 className="h-4 w-4 mb-1" />
+              <span className="text-xs truncate">Analytics</span>
+            </Button>
+
+            {/* Settings */}
+            <Button
+              variant="ghost"
+              className={`flex-col h-16 min-h-[44px] px-1 py-2 ${
+                currentPage === "settings" ? "text-blue-600 bg-blue-50" : "text-gray-600"
+              }`}
+              onClick={() => handleNavigation("/settings")}
+            >
+              <Settings className="h-4 w-4 mb-1" />
+              <span className="text-xs truncate">Settings</span>
+            </Button>
+            
+            {/* Notifications */}
+            <Button
+              variant="ghost"
+              className={`flex-col h-16 min-h-[44px] px-1 py-2 relative ${
                 currentPage === "notifications" ? "text-blue-600 bg-blue-50" : "text-gray-600"
               }`}
               onClick={() => setNotificationCenterOpen(true)}
             >
-              <Bell className="h-5 w-5 mb-1" />
+              <Bell className="h-4 w-4 mb-1" />
               <span className="text-xs truncate">Notifications</span>
               {unreadCount > 0 && (
                 <Badge 
                   variant="destructive" 
-                  className="absolute top-1 right-2 h-4 w-4 p-0 text-xs flex items-center justify-center"
+                  className="absolute top-1 right-1 h-3 w-3 p-0 text-xs flex items-center justify-center"
                 >
                   {unreadCount > 9 ? '9+' : unreadCount}
                 </Badge>
               )}
-            </Button>
-            
-            {/* More button for additional items */}
-            <Button
-              variant="ghost"
-              className="flex-1 flex-col h-16 min-h-[44px] px-2 py-2 text-gray-600"
-              onClick={() => setIsOpen(true)}
-            >
-              <Menu className="h-5 w-5 mb-1" />
-              <span className="text-xs">More</span>
             </Button>
           </div>
         </div>

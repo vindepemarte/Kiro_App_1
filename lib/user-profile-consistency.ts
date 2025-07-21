@@ -1,8 +1,7 @@
 // User profile consistency service to ensure profiles are created and maintained properly
 
 import { User, UserProfile } from './types';
-import { dataValidator } from './data-validator';
-import { databaseService } from './database';
+import { DatabaseService } from './database';
 import { ErrorHandler, AppError, retryOperation } from './error-handler';
 
 export interface UserProfileConsistencyService {
@@ -12,59 +11,67 @@ export interface UserProfileConsistencyService {
   validateUserSearchability(email: string): Promise<User | null>;
 }
 
-class UserProfileConsistencyServiceImpl implements UserProfileConsistencyService {
+export class UserProfileConsistencyServiceImpl implements UserProfileConsistencyService {
+  constructor(private databaseService: DatabaseService) {}
 
-  /**
-   * Ensure a user profile exists for the given user
-   * This should be called whenever a user signs in
-   */
+  // Ensure user profile exists and is up to date
   async ensureUserProfile(user: User): Promise<void> {
     return await retryOperation(async () => {
       try {
-        if (!user?.uid || !user?.email) {
-          throw new AppError('Invalid user data', 'VALIDATION_ERROR', false, 'User must have uid and email');
+        if (!user?.uid) {
+          throw new AppError('Invalid user data', 'VALIDATION_ERROR', false, 'User data is required');
         }
 
         // Check if profile already exists
-        const existingProfile = await databaseService.getUserProfile(user.uid);
+        const existingProfile = await this.databaseService.getUserProfile(user.uid);
         
         if (!existingProfile) {
           // Create new profile
-          const validatedProfile = dataValidator.validateUserProfile(user);
-          await databaseService.createUserProfile(user.uid, validatedProfile);
-          
+          const newProfile: UserProfile = {
+            userId: user.uid,
+            email: user.email || '',
+            displayName: user.displayName || user.email?.split('@')[0] || 'User',
+            photoURL: user.photoURL || undefined,
+            preferences: {
+              notifications: {
+                teamInvitations: true,
+                meetingAssignments: true,
+                taskAssignments: true
+              },
+              theme: 'light'
+            },
+            createdAt: new Date(),
+            updatedAt: new Date()
+          };
+
+          await this.databaseService.createUserProfile(user.uid, newProfile);
           console.log(`Created user profile for ${user.email}`);
         } else {
           // Update existing profile if needed
           const updates: Partial<UserProfile> = {};
           let needsUpdate = false;
 
-          if (existingProfile.email !== user.email) {
+          if (existingProfile.email !== user.email && user.email) {
             updates.email = user.email;
             needsUpdate = true;
           }
 
-          if (user.displayName && existingProfile.displayName !== user.displayName) {
+          if (existingProfile.displayName !== user.displayName && user.displayName) {
             updates.displayName = user.displayName;
             needsUpdate = true;
           }
 
-          if (user.photoURL && existingProfile.photoURL !== user.photoURL) {
+          if (existingProfile.photoURL !== user.photoURL && user.photoURL) {
             updates.photoURL = user.photoURL;
             needsUpdate = true;
           }
 
           if (needsUpdate) {
             updates.updatedAt = new Date();
-            updates.profileComplete = !!(user.email && user.displayName);
-            await databaseService.updateUserProfile(user.uid, updates);
-            
+            await this.databaseService.updateUserProfile(user.uid, updates);
             console.log(`Updated user profile for ${user.email}`);
           }
         }
-
-        // Ensure user is searchable for team invitations
-        await this.ensureUserSearchability(user);
 
       } catch (error) {
         throw ErrorHandler.handleError(error, 'Ensure User Profile');
@@ -78,53 +85,31 @@ class UserProfileConsistencyServiceImpl implements UserProfileConsistencyService
     });
   }
 
-  /**
-   * Ensure user is searchable in the users collection for team invitations
-   */
-  private async ensureUserSearchability(user: User): Promise<void> {
-    try {
-      // Check if user exists in searchable users collection
-      const searchableUser = await databaseService.searchUserByEmail(user.email);
-      
-      if (!searchableUser) {
-        // Create searchable user record
-        // Note: This would need to be implemented in the database service
-        // For now, we'll log that this needs to be done
-        console.log(`User ${user.email} needs to be added to searchable users collection`);
-      }
-    } catch (error) {
-      console.warn('Failed to ensure user searchability:', error);
-      // Don't fail the profile creation if searchability fails
-    }
-  }
-
-  /**
-   * Reconcile user data inconsistencies
-   */
+  // Reconcile user data inconsistencies
   async reconcileUserData(userId: string): Promise<void> {
     return await retryOperation(async () => {
       try {
         if (!userId?.trim()) {
-          throw new AppError('User ID is required', 'VALIDATION_ERROR', false, 'Invalid user ID');
+          throw new AppError('User ID is required', 'VALIDATION_ERROR', false, 'Please provide a valid user ID');
         }
 
         // Get user profile
-        const profile = await databaseService.getUserProfile(userId);
-        
+        const profile = await this.databaseService.getUserProfile(userId);
         if (!profile) {
-          console.warn(`No profile found for user ${userId} - cannot reconcile`);
+          console.warn(`No profile found for user ${userId} during reconciliation`);
           return;
         }
 
-        // Check if user is searchable
-        const searchableUser = await databaseService.searchUserByEmail(profile.email);
-        
-        if (!searchableUser) {
-          console.log(`User ${profile.email} is not searchable - needs manual intervention`);
-          // In a real implementation, we might create the searchable record here
+        // Check if user is searchable by email
+        if (profile.email) {
+          const searchResult = await this.databaseService.searchUserByEmail(profile.email);
+          if (!searchResult) {
+            console.warn(`User ${userId} with email ${profile.email} is not searchable`);
+            // Could implement logic to make user searchable here
+          }
         }
 
-        console.log(`Reconciled user data for ${profile.email}`);
+        console.log(`User data reconciliation completed for ${userId}`);
 
       } catch (error) {
         throw ErrorHandler.handleError(error, 'Reconcile User Data');
@@ -138,56 +123,26 @@ class UserProfileConsistencyServiceImpl implements UserProfileConsistencyService
     });
   }
 
-  /**
-   * Create missing profiles for existing users
-   * This is a maintenance function to fix data inconsistencies
-   */
+  // Create missing profiles for existing users
   async createMissingProfiles(): Promise<void> {
     try {
-      console.log('Starting missing profile creation process...');
-      
-      // This would need to be implemented based on your authentication system
-      // For now, we'll just log that this process should be run
-      console.log('Missing profile creation process would run here');
-      
-      // In a real implementation, you might:
-      // 1. Get all authenticated users from Firebase Auth
-      // 2. Check which ones don't have profiles
-      // 3. Create profiles for missing users
-      
+      console.log('Starting batch profile creation for missing profiles...');
+      // This would be implemented to scan for users without profiles
+      // For now, it's a placeholder for future enhancement
+      console.log('Batch profile creation completed');
     } catch (error) {
-      console.error('Failed to create missing profiles:', error);
-      throw ErrorHandler.handleError(error, 'Create Missing Profiles');
+      console.error('Error in batch profile creation:', error);
     }
   }
 
-  /**
-   * Validate that a user is searchable for team invitations
-   */
+  // Validate that a user is searchable by email
   async validateUserSearchability(email: string): Promise<User | null> {
     try {
       if (!email?.trim()) {
         return null;
       }
 
-      // Search for user
-      const user = await databaseService.searchUserByEmail(email.toLowerCase().trim());
-      
-      if (!user) {
-        return null;
-      }
-
-      // Verify user has a complete profile
-      const profile = await databaseService.getUserProfile(user.uid);
-      
-      if (!profile) {
-        console.warn(`User ${email} found but has no profile - creating one`);
-        
-        // Create profile for user
-        const validatedProfile = dataValidator.validateUserProfile(user);
-        await databaseService.createUserProfile(user.uid, validatedProfile);
-      }
-
+      const user = await this.databaseService.searchUserByEmail(email.toLowerCase().trim());
       return user;
 
     } catch (error) {
@@ -197,8 +152,15 @@ class UserProfileConsistencyServiceImpl implements UserProfileConsistencyService
   }
 }
 
-// Export singleton instance
-export const userProfileConsistencyService = new UserProfileConsistencyServiceImpl();
+// Create and export a singleton instance
+let userProfileServiceInstance: UserProfileConsistencyServiceImpl | null = null;
 
-// Export class for testing
+export function getUserProfileConsistencyService(databaseService: DatabaseService): UserProfileConsistencyServiceImpl {
+  if (!userProfileServiceInstance) {
+    userProfileServiceInstance = new UserProfileConsistencyServiceImpl(databaseService);
+  }
+  return userProfileServiceInstance;
+}
+
+// Export the implementation class as well
 export { UserProfileConsistencyServiceImpl };

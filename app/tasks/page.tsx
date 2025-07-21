@@ -4,7 +4,8 @@ import { useState, useEffect, useMemo, useRef, useCallback } from "react"
 import { useAuth } from "@/contexts/auth-context"
 import { useRouter } from "next/navigation"
 import { databaseService } from "@/lib/database"
-import { Meeting, ActionItem, Team } from "@/lib/types"
+import { taskService } from "@/lib/task-service"
+import { Meeting, ActionItem, Team, TaskWithContext } from "@/lib/types"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -67,59 +68,37 @@ export default function TasksPage() {
     }
   }, [user, loading, router])
 
-  // Memoized function to load tasks
-  const loadTasks = useCallback(async (userTeams: Team[]) => {
+  // Memoized function to load tasks using the new task service
+  const loadTasks = useCallback(async () => {
     if (!user || loadingRef.current) return
     
     loadingRef.current = true
     setTasksLoading(true)
 
     try {
-      // Get all user meetings first
-      const userMeetings = await databaseService.getUserMeetings(user.uid)
+      // Use the new task management service to get all user tasks
+      const userTasks = await taskService.getUserTasks(user.uid)
       
-      // Get all team meetings for teams user is part of (only if teams exist)
-      let teamMeetings: Meeting[] = []
-      if (userTeams.length > 0) {
-        const teamMeetingsPromises = userTeams.map(async (team) => {
-          try {
-            return await databaseService.getTeamMeetings(team.id)
-          } catch (error) {
-            console.warn(`Failed to load meetings for team ${team.name}:`, error)
-            return []
-          }
-        })
+      // Convert TaskWithContext to TaskWithMeeting format for compatibility
+      const tasksWithMeeting: TaskWithMeeting[] = userTasks.map(task => ({
+        id: task.id,
+        description: task.description,
+        owner: task.owner,
+        assigneeId: task.assigneeId,
+        assigneeName: task.assigneeName,
+        deadline: task.deadline,
+        priority: task.priority,
+        status: task.status,
+        assignedBy: task.assignedBy,
+        assignedAt: task.assignedAt,
+        meetingId: task.meetingId,
+        meetingTitle: task.meetingTitle,
+        meetingDate: task.meetingDate,
+        teamId: task.teamId,
+        teamName: task.teamName
+      }))
 
-        const teamMeetingsArrays = await Promise.all(teamMeetingsPromises)
-        teamMeetings = teamMeetingsArrays.flat()
-      }
-
-      // Combine and deduplicate meetings
-      const allMeetings = [...userMeetings, ...teamMeetings]
-      const uniqueMeetings = allMeetings.filter((meeting, index, self) => 
-        index === self.findIndex(m => m.id === meeting.id)
-      )
-
-      // Extract tasks assigned to current user
-      const userTasks: TaskWithMeeting[] = []
-      
-      uniqueMeetings.forEach(meeting => {
-        meeting.actionItems.forEach(task => {
-          if (task.assigneeId === user.uid) {
-            const teamInfo = userTeams.find(t => t.id === meeting.teamId)
-            userTasks.push({
-              ...task,
-              meetingId: meeting.id,
-              meetingTitle: meeting.title,
-              meetingDate: meeting.date,
-              teamId: meeting.teamId,
-              teamName: teamInfo?.name
-            })
-          }
-        })
-      })
-
-      setTasks(userTasks)
+      setTasks(tasksWithMeeting)
     } catch (error) {
       console.error('Error loading tasks:', error)
       toast.error('Failed to load tasks', {
@@ -131,45 +110,66 @@ export default function TasksPage() {
     }
   }, [user, toast])
 
-  // Load user teams and tasks
+  // Load user teams and set up real-time task subscriptions
   useEffect(() => {
     if (!user) return
 
-    const unsubscribe = databaseService.subscribeToUserTeams(
+    // Subscribe to user teams
+    const unsubscribeTeams = databaseService.subscribeToUserTeams(
       user.uid,
       (userTeams) => {
         setTeams(userTeams)
         
-        // Only load tasks if teams have changed or this is the first load
+        // Load tasks initially or when teams change
         if (!teamsLoadedRef.current || userTeams.length !== lastTeamsLengthRef.current) {
           teamsLoadedRef.current = true
           lastTeamsLengthRef.current = userTeams.length
-          loadTasks(userTeams)
+          loadTasks()
         }
       }
     )
 
-    return unsubscribe
-  }, [user?.uid]) // Only depend on user ID
+    // Subscribe to real-time task updates
+    const unsubscribeTasks = taskService.subscribeToUserTasks(
+      user.uid,
+      (userTasks) => {
+        // Convert TaskWithContext to TaskWithMeeting format for compatibility
+        const tasksWithMeeting: TaskWithMeeting[] = userTasks.map(task => ({
+          id: task.id,
+          description: task.description,
+          owner: task.owner,
+          assigneeId: task.assigneeId,
+          assigneeName: task.assigneeName,
+          deadline: task.deadline,
+          priority: task.priority,
+          status: task.status,
+          assignedBy: task.assignedBy,
+          assignedAt: task.assignedAt,
+          meetingId: task.meetingId,
+          meetingTitle: task.meetingTitle,
+          meetingDate: task.meetingDate,
+          teamId: task.teamId,
+          teamName: task.teamName
+        }))
 
-  // Handle task status update
+        setTasks(tasksWithMeeting)
+        setTasksLoading(false)
+      }
+    )
+
+    return () => {
+      unsubscribeTeams()
+      unsubscribeTasks()
+    }
+  }, [user?.uid]) // Remove loadTasks dependency since we're using real-time subscriptions
+
+  // Handle task status update using the new task service
   const handleTaskStatusUpdate = async (taskId: string, meetingId: string, newStatus: ActionItem['status']) => {
     if (!user) return
 
     try {
-      // Get the meeting to update the task
-      const meeting = await databaseService.getMeetingById(meetingId, user.uid)
-      if (!meeting) {
-        toast.error('Meeting not found', { title: 'Update Failed' })
-        return
-      }
-
-      // Update the task status
-      const updatedActionItems = meeting.actionItems.map(item => 
-        item.id === taskId ? { ...item, status: newStatus } : item
-      )
-
-      await databaseService.updateMeeting(meetingId, user.uid, { actionItems: updatedActionItems })
+      // Use the task management service to update task status
+      await taskService.updateTaskStatus(taskId, meetingId, newStatus, user.uid)
 
       // Update local state
       setTasks(prevTasks => 
@@ -266,7 +266,7 @@ export default function TasksPage() {
       
       <ResponsiveContainer maxWidth="full" padding={{ mobile: 4, tablet: 6, desktop: 8 }}>
         <PullToRefresh onRefresh={handleRefresh}>
-          <div className={`py-6 md:py-8 ${isMobile ? 'pb-24' : ''}`}>
+          <div className={`py-6 md:py-8 ${isMobile ? 'pb-20' : ''}`}>
             {/* Header */}
             <div className="mb-6 md:mb-8">
               <h1 className={`font-bold text-gray-900 mb-2 ${isMobile ? 'text-2xl' : 'text-3xl'}`}>
