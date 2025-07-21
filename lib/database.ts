@@ -38,6 +38,7 @@ import {
   UserProfile
 } from './types';
 import { ErrorHandler, AppError, retryOperation } from './error-handler';
+import { dataValidator } from './data-validator';
 
 export interface DatabaseService {
   // Meeting operations
@@ -348,31 +349,16 @@ class FirestoreService implements DatabaseService {
 
         const meetingsCollection = collection(this.db, this.getUserMeetingsPath(userId));
         
-        const meetingTitle = this.generateMeetingTitle(meeting.rawTranscript, meeting.summary);
-        const meetingData = {
-          title: meetingTitle,
-          date: Timestamp.fromDate(new Date()),
-          summary: meeting.summary || '',
-          actionItems: this.processActionItems(meeting.actionItems || [], true),
-          rawTranscript: meeting.rawTranscript || '',
-          teamId: teamId || undefined,
-          createdAt: Timestamp.fromDate(new Date()),
-          updatedAt: Timestamp.fromDate(new Date()),
-          metadata: {
-            fileName: meeting.metadata?.fileName || 'unknown',
-            fileSize: meeting.metadata?.fileSize || 0,
-            uploadedAt: Timestamp.fromDate(meeting.metadata?.uploadedAt || new Date()),
-            processingTime: meeting.metadata?.processingTime || 0,
-          },
-        };
-
-        const docRef = await addDoc(meetingsCollection, meetingData);
+        // Use data validator to ensure clean data
+        const validatedMeetingData = dataValidator.validateMeetingData(meeting, teamId);
+        
+        const docRef = await addDoc(meetingsCollection, validatedMeetingData);
         const meetingId = docRef.id;
 
         // Send meeting assignment notifications if assigned to a team
-        if (teamId) {
+        if (validatedMeetingData.teamId) {
           try {
-            await this.sendMeetingAssignmentNotifications(meetingId, meetingTitle, teamId, userId);
+            await this.sendMeetingAssignmentNotifications(meetingId, validatedMeetingData.title, validatedMeetingData.teamId, userId);
           } catch (notificationError) {
             console.warn('Failed to send meeting assignment notifications:', notificationError);
             // Don't fail the meeting save if notifications fail
@@ -1202,20 +1188,41 @@ class FirestoreService implements DatabaseService {
 
   // ===== USER SEARCH OPERATIONS =====
 
-  // Search for a user by email (simplified implementation)
+  // Search for a user by email in userProfiles collection
   async searchUserByEmail(email: string): Promise<User | null> {
     try {
-      // In a real implementation, this would search a users collection
-      // For now, we'll return a mock user structure that can be used for invitations
-      // The actual user data will be populated when they accept the invitation
-      
       if (!email || !email.includes('@')) {
         return null;
       }
 
-      // User not found - return null to force proper error handling
-      // No more temporary IDs - users must exist before they can be invited
-      return null;
+      const normalizedEmail = email.toLowerCase().trim();
+      
+      // Search in userProfiles collection
+      const userProfilesCollection = collection(this.db, this.getUserProfilesPath());
+      const q = query(userProfilesCollection, where('email', '==', normalizedEmail));
+      
+      const querySnapshot = await getDocs(q);
+      
+      if (querySnapshot.empty) {
+        // No more temporary IDs - users must exist before they can be invited
+        return null;
+      }
+
+      // Get the first matching user profile
+      const userProfileDoc = querySnapshot.docs[0];
+      const profileData = userProfileDoc.data();
+      
+      // Convert profile data to User format
+      const user: User = {
+        uid: userProfileDoc.id,
+        email: profileData.email,
+        displayName: profileData.displayName,
+        photoURL: profileData.photoURL || null,
+        isAnonymous: false,
+        customClaims: null,
+      };
+
+      return user;
     } catch (error) {
       console.error('User search error:', error);
       return null;

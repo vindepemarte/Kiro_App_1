@@ -466,7 +466,7 @@ function TaskCard({
                       <SelectValue placeholder="Select assignee" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="" className="h-12 text-base">
+                      <SelectItem value="unassigned" className="h-12 text-base">
                         <div className="flex items-center gap-2">
                           <div className="h-6 w-6 rounded-full bg-gray-200" />
                           <span>Unassigned</span>

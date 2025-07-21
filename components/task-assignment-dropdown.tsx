@@ -106,7 +106,7 @@ export function TaskAssignmentDropdown({
         <SelectContent className={cn(
           isMobile && "min-w-[280px]"
         )}>
-          <SelectItem value="" className={cn(
+          <SelectItem value="unassigned" className={cn(
             isMobile ? "h-12 text-base" : "h-8 text-xs"
           )}>
             <div className="flex items-center gap-2">

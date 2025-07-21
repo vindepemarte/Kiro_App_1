@@ -2,282 +2,282 @@
 
 ## Overview
 
-This design addresses critical integration issues in the Meeting AI MVP system. The main problems are:
-
-1. **Broken Team Management**: Teams exist but member management doesn't work
-2. **Meeting-Team Assignment Failure**: Meetings don't get assigned to teams properly
-3. **Notification System Failures**: Notifications fail to load and function
-4. **Settings Persistence Issues**: User settings don't save properly
-5. **Real-time Sync Problems**: Data doesn't update in real-time across components
-
-## Root Cause Analysis
-
-### 1. Team Management Issues
-- **Problem**: Team member operations (add/remove/update) fail silently
-- **Root Cause**: Database service methods not properly bound, Firestore rules too restrictive
-- **Impact**: Teams can be created but not managed
-
-### 2. Meeting-Team Assignment Issues
-- **Problem**: Meetings uploaded "for team" still go to personal meetings
-- **Root Cause**: Meeting processing doesn't respect team selection, missing teamId in meeting data
-- **Impact**: Team collaboration features don't work
-
-### 3. Notification System Issues
-- **Problem**: Notifications fail to load with permission errors
-- **Root Cause**: Firestore rules don't allow proper notification queries, notification service not properly initialized
-- **Impact**: Users don't receive team invitations or updates
-
-### 4. Settings Persistence Issues
-- **Problem**: User settings revert after saving
-- **Root Cause**: Settings service doesn't properly save to database, missing user profile management
-- **Impact**: User experience is broken, settings don't persist
-
-### 5. Real-time Sync Issues
-- **Problem**: Data doesn't update across components in real-time
-- **Root Cause**: Missing real-time listeners, components don't subscribe to data changes
-- **Impact**: Stale data displayed, poor user experience
+This design addresses the critical integration issues in the MeetingAI system by implementing systematic fixes across the meeting upload system, user profile management, team invitation workflow, and UI components. The approach focuses on data validation, consistent user ID handling, and robust error handling.
 
 ## Architecture
 
-### Component Integration Flow
-```
-User Action → Component → Service Layer → Database → Real-time Updates → UI Updates
-```
+### Core Problem Analysis
 
-### Data Flow Diagram
-```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   UI Components │    │  Service Layer  │    │    Database     │
-│                 │    │                 │    │                 │
-│ - Team Mgmt     │◄──►│ - Team Service  │◄──►│ - Teams Coll    │
-│ - Notifications │    │ - Notification  │    │ - Notifications │
-│ - Settings      │    │ - User Service  │    │ - Users Coll    │
-│ - Meetings      │    │ - Meeting Svc   │    │ - Meetings Coll │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
+1. **Meeting Upload Issues**: `teamId` field being set to `undefined` instead of being omitted
+2. **User Profile Inconsistency**: Profiles not created consistently across collections
+3. **Team Invitation ID Mismatch**: Still using temporary IDs in some code paths
+4. **UI Component Errors**: Select components with empty values
+5. **Real-time Listener Errors**: Permission and data consistency issues
+
+### Solution Architecture
+
+```mermaid
+graph TB
+    A[User Authentication] --> B[Profile Creation Service]
+    B --> C[User Profile Consistency]
+    C --> D[Team Invitation System]
+    D --> E[Meeting Assignment System]
+    E --> F[Real-time Updates]
+    
+    G[Meeting Upload] --> H[Data Validation Layer]
+    H --> I[Database Service]
+    I --> J[Firestore]
+    
+    K[UI Components] --> L[Error Boundary]
+    L --> M[Data Validation]
+    M --> N[Safe Rendering]
 ```
 
 ## Components and Interfaces
 
-### 1. Enhanced Database Service
+### 1. Data Validation Layer
+
+**Purpose**: Ensure all database operations use valid data
+
+**Interface**:
 ```typescript
-interface DatabaseService {
-  // Team operations with proper binding
-  createTeam(teamData: CreateTeamData): Promise<string>
-  getUserTeams(userId: string): Promise<Team[]>
-  updateTeam(teamId: string, updates: Partial<Team>): Promise<boolean>
-  
-  // Meeting operations with team support
-  saveMeeting(userId: string, meeting: ProcessedMeeting, teamId?: string): Promise<string>
-  getTeamMeetings(teamId: string): Promise<Meeting[]>
-  
-  // User profile operations
-  createUserProfile(userId: string, profile: UserProfile): Promise<void>
-  updateUserProfile(userId: string, updates: Partial<UserProfile>): Promise<void>
-  getUserProfile(userId: string): Promise<UserProfile | null>
-  
-  // Notification operations with proper permissions
-  createNotification(notification: CreateNotificationData): Promise<string>
-  getUserNotifications(userId: string): Promise<Notification[]>
-  subscribeToUserNotifications(userId: string, callback: (notifications: Notification[]) => void): Unsubscribe
+interface DataValidator {
+  validateMeetingData(meeting: ProcessedMeeting, teamId?: string): ValidatedMeetingData;
+  validateUserProfile(user: User): ValidatedUserProfile;
+  validateTeamMember(member: TeamMember): ValidatedTeamMember;
+  sanitizeUndefinedFields<T>(data: T): T;
 }
 ```
 
-### 2. Team Service Integration
+**Implementation**:
+- Remove undefined fields before database operations
+- Provide default values for required fields
+- Validate data types and constraints
+- Handle optional fields properly
+
+### 2. User Profile Consistency Service
+
+**Purpose**: Ensure user profiles are created and maintained consistently
+
+**Interface**:
 ```typescript
-interface TeamService {
-  // Enhanced team management
-  inviteUserToTeam(teamId: string, inviterUserId: string, email: string, displayName: string): Promise<void>
-  removeTeamMember(teamId: string, userId: string, removedBy: string): Promise<boolean>
-  updateTeamMemberRole(teamId: string, userId: string, role: TeamMember['role'], updatedBy: string): Promise<boolean>
-  
-  // Real-time subscriptions
-  subscribeToTeam(teamId: string, callback: (team: Team) => void): Unsubscribe
-  subscribeToUserTeams(userId: string, callback: (teams: Team[]) => void): Unsubscribe
+interface UserProfileConsistencyService {
+  ensureUserProfile(user: User): Promise<void>;
+  reconcileUserData(userId: string): Promise<void>;
+  createMissingProfiles(): Promise<void>;
+  validateUserSearchability(email: string): Promise<User | null>;
 }
 ```
 
-### 3. User Profile Service
+**Implementation**:
+- Create profiles in both `users` and `userProfiles` collections
+- Reconcile data inconsistencies automatically
+- Ensure searchable user data for team invitations
+- Handle authentication-to-profile mapping
+
+### 3. Enhanced Team Service
+
+**Purpose**: Fix team invitation workflow with consistent user IDs
+
+**Interface**:
 ```typescript
-interface UserProfileService {
-  createProfile(userId: string, profile: UserProfile): Promise<void>
-  updateProfile(userId: string, updates: Partial<UserProfile>): Promise<void>
-  getProfile(userId: string): Promise<UserProfile | null>
-  subscribeToProfile(userId: string, callback: (profile: UserProfile) => void): Unsubscribe
+interface EnhancedTeamService extends TeamService {
+  validateUserExists(email: string): Promise<User>;
+  inviteUserWithValidation(teamId: string, inviterUserId: string, email: string, displayName: string): Promise<void>;
+  acceptInvitationWithCleanup(invitationId: string, userId: string): Promise<void>;
+  ensureTeamMembershipConsistency(teamId: string): Promise<void>;
 }
 ```
 
-### 4. Meeting Processing Service
-```typescript
-interface MeetingProcessingService {
-  processMeeting(file: File, options: ProcessingOptions): Promise<ProcessedMeeting>
-  saveMeeting(userId: string, meeting: ProcessedMeeting, teamId?: string): Promise<string>
-  assignMeetingToTeam(meetingId: string, teamId: string, userId: string): Promise<boolean>
-}
+**Implementation**:
+- Strict user existence validation before invitations
+- Consistent real user ID usage throughout
+- Proper cleanup of temporary records
+- Real-time membership updates
 
-interface ProcessingOptions {
-  teamId?: string
-  assignToTeam?: boolean
-  notifyTeamMembers?: boolean
+### 4. Meeting Data Service
+
+**Purpose**: Handle meeting uploads with proper data validation
+
+**Interface**:
+```typescript
+interface MeetingDataService {
+  saveMeetingWithValidation(userId: string, meeting: ProcessedMeeting, teamId?: string): Promise<string>;
+  validateMeetingFields(meeting: ProcessedMeeting): ProcessedMeeting;
+  handleTeamAssignment(meetingId: string, teamId: string): Promise<void>;
 }
 ```
+
+**Implementation**:
+- Validate all fields before database insertion
+- Handle optional teamId properly (omit if undefined)
+- Ensure metadata has default values
+- Proper error handling and user feedback
+
+### 5. UI Error Handling Layer
+
+**Purpose**: Prevent UI component errors and handle edge cases
+
+**Interface**:
+```typescript
+interface UIErrorHandler {
+  validateSelectOptions(options: SelectOption[]): SelectOption[];
+  handleEmptyData<T>(data: T[], fallback: T[]): T[];
+  safeRender<T>(component: React.ComponentType<T>, props: T): React.ReactElement;
+}
+```
+
+**Implementation**:
+- Validate Select component values are non-empty
+- Provide fallback data for empty states
+- Graceful error boundaries
+- Safe data rendering patterns
 
 ## Data Models
 
-### Enhanced Meeting Model
+### Enhanced Meeting Data Model
+
 ```typescript
-interface Meeting {
-  id: string
-  title: string
-  date: Date
-  summary: string
-  actionItems: ActionItem[]
-  rawTranscript: string
-  teamId?: string  // Team assignment
-  createdBy: string
-  createdAt: Date
-  updatedAt: Date
+interface ValidatedMeetingData {
+  title: string;
+  date: Timestamp;
+  summary: string;
+  actionItems: ActionItem[];
+  rawTranscript: string;
+  teamId?: string; // Optional, omitted if undefined
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
   metadata: {
-    fileName: string
-    fileSize: number
-    uploadedAt: Date
-    processingTime: number
-  }
+    fileName: string;
+    fileSize: number;
+    uploadedAt: Timestamp;
+    processingTime: number;
+  };
 }
 ```
 
-### User Profile Model
+### Consistent User Profile Model
+
 ```typescript
-interface UserProfile {
-  userId: string
-  email: string
-  displayName: string
-  photoURL?: string
-  preferences: {
-    notifications: {
-      teamInvitations: boolean
-      meetingAssignments: boolean
-      taskAssignments: boolean
-    }
-    theme: 'light' | 'dark' | 'system'
-  }
-  createdAt: Date
-  updatedAt: Date
+interface ConsistentUserProfile {
+  uid: string;
+  email: string;
+  displayName: string;
+  photoURL?: string;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+  searchable: boolean; // For team invitation searches
+  profileComplete: boolean;
 }
 ```
 
-### Enhanced Notification Model
-```typescript
-interface Notification {
-  id: string
-  userId: string
-  type: 'team_invitation' | 'meeting_assignment' | 'task_assignment' | 'team_update'
-  title: string
-  message: string
-  data: {
-    teamId?: string
-    meetingId?: string
-    taskId?: string
-    inviterId?: string
-    [key: string]: any
-  }
-  read: boolean
-  actionable: boolean
-  actions?: NotificationAction[]
-  createdAt: Date
-}
+### Enhanced Team Member Model
 
-interface NotificationAction {
-  type: 'accept' | 'decline' | 'view' | 'dismiss'
-  label: string
-  handler: string
+```typescript
+interface ValidatedTeamMember {
+  userId: string; // Always real Firebase Auth UID
+  email: string;
+  displayName: string;
+  role: 'admin' | 'member';
+  status: 'active' | 'invited';
+  joinedAt: Timestamp;
+  invitedAt?: Timestamp;
+  invitedBy?: string;
 }
 ```
 
 ## Error Handling
 
-### Error Types
-```typescript
-enum ErrorType {
-  PERMISSION_DENIED = 'permission_denied',
-  NOT_FOUND = 'not_found',
-  NETWORK_ERROR = 'network_error',
-  VALIDATION_ERROR = 'validation_error',
-  AUTHENTICATION_ERROR = 'authentication_error'
-}
+### Database Error Handling
 
-interface AppError {
-  type: ErrorType
-  message: string
-  details?: any
-  retryable: boolean
-}
-```
+1. **Validation Errors**: Catch undefined field errors before database operations
+2. **Permission Errors**: Provide user-friendly messages and retry logic
+3. **Network Errors**: Implement exponential backoff and offline handling
+4. **Data Consistency Errors**: Automatic reconciliation and repair
 
-### Error Handling Strategy
-1. **Graceful Degradation**: Show partial data when possible
-2. **Retry Mechanisms**: Automatic retry for transient errors
-3. **User Feedback**: Clear error messages with actionable steps
-4. **Fallback States**: Default states when data loading fails
+### UI Error Handling
+
+1. **Component Errors**: Error boundaries with fallback UI
+2. **Data Loading Errors**: Loading states and error messages
+3. **Real-time Update Errors**: Graceful degradation to manual refresh
+4. **Form Validation Errors**: Clear user feedback and guidance
+
+### Integration Error Handling
+
+1. **Team Invitation Errors**: Clear error messages and retry options
+2. **Meeting Upload Errors**: Detailed error information and suggestions
+3. **User Search Errors**: Fallback search methods and user guidance
+4. **Real-time Listener Errors**: Automatic reconnection and error recovery
 
 ## Testing Strategy
 
+### Unit Tests
+
+- Data validation functions
+- User profile consistency logic
+- Team invitation workflow steps
+- Meeting data processing
+- UI component error handling
+
 ### Integration Tests
-1. **Team Management Flow**: Create team → Invite members → Manage roles → Delete team
-2. **Meeting Assignment Flow**: Upload meeting → Assign to team → Verify team members can see it
-3. **Notification Flow**: Send invitation → Receive notification → Accept/decline → Verify team membership
-4. **Settings Flow**: Update profile → Save → Reload → Verify persistence
 
-### Error Scenarios
-1. **Network Failures**: Test offline/online transitions
-2. **Permission Errors**: Test unauthorized access attempts
-3. **Data Corruption**: Test malformed data handling
-4. **Concurrent Updates**: Test simultaneous user actions
+- End-to-end team invitation workflow
+- Meeting upload and team assignment
+- User profile creation and search
+- Real-time listener functionality
+- Database operation validation
 
-## Performance Considerations
+### Error Scenario Tests
 
-### Real-time Updates
-- Use Firestore real-time listeners efficiently
-- Implement proper cleanup to prevent memory leaks
-- Batch updates where possible
+- Undefined field handling
+- Permission error recovery
+- Network failure handling
+- Data inconsistency resolution
+- UI component error boundaries
 
-### Data Loading
-- Implement pagination for large datasets
-- Use skeleton loading states
-- Cache frequently accessed data
+## Implementation Plan
 
-### Error Recovery
-- Implement exponential backoff for retries
-- Use circuit breaker pattern for failing services
-- Provide offline capabilities where possible
+### Phase 1: Data Validation Layer
+- Implement data validation utilities
+- Add undefined field sanitization
+- Update database service with validation
+- Test with existing data
 
-## Security Considerations
+### Phase 2: User Profile Consistency
+- Implement profile consistency service
+- Add automatic profile creation on sign-in
+- Reconcile existing user data
+- Update user search functionality
 
-### Firestore Rules Updates
-- Ensure proper team member validation
-- Implement role-based access control
-- Validate data integrity on writes
+### Phase 3: Team Invitation Fixes
+- Update team service with strict validation
+- Fix user ID consistency issues
+- Implement proper cleanup logic
+- Test invitation workflow end-to-end
 
-### Data Validation
-- Validate all user inputs
-- Sanitize data before storage
-- Implement proper authentication checks
+### Phase 4: Meeting Upload Fixes
+- Add meeting data validation
+- Fix teamId handling
+- Update metadata processing
+- Test upload functionality
 
-## Migration Strategy
+### Phase 5: UI Error Handling
+- Add Select component validation
+- Implement error boundaries
+- Update data loading patterns
+- Test UI error scenarios
 
-### Phase 1: Fix Core Issues
-1. Fix database service method binding
-2. Update Firestore security rules
-3. Implement user profile service
-4. Fix notification loading
+### Phase 6: Integration Testing
+- Test complete workflows
+- Verify real-time updates
+- Validate error handling
+- Performance optimization
 
-### Phase 2: Enhance Integration
-1. Implement meeting-team assignment
-2. Add real-time synchronization
-3. Enhance error handling
-4. Add comprehensive testing
+## Monitoring and Observability
 
-### Phase 3: Polish and Optimize
-1. Optimize performance
-2. Add advanced features
-3. Improve user experience
-4. Add monitoring and analytics
+- Database operation success/failure rates
+- User profile creation consistency
+- Team invitation completion rates
+- Meeting upload success rates
+- UI error occurrence tracking
+- Real-time listener health monitoring

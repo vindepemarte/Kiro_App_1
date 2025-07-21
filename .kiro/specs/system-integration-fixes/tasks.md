@@ -1,147 +1,161 @@
-# System Integration Fixes - Implementation Tasks
+# System Integration Fixes - Implementation Plan
 
-## Phase 1: Core Database and Service Fixes
+## Task 1: Fix Meeting Upload Data Validation
 
-- [x] 1. Fix Database Service Method Binding Issues
-  - Fix all database service methods to prevent context loss
-  - Ensure proper error handling in database operations
-  - Add comprehensive logging for debugging
-  - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6_
+- [x] 1.1 Create data validation utility for meeting data
+  - Implement function to sanitize undefined fields from objects
+  - Add validation for required meeting fields
+  - Handle optional teamId field properly (omit if undefined)
+  - _Requirements: 1.1, 1.2, 1.3, 1.4, 6.1, 6.2_
 
-- [x] 2. Implement User Profile Service
-  - Create user profile service for managing user settings
-  - Implement profile creation, update, and retrieval methods
-  - Add real-time profile synchronization
-  - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5_
+- [x] 1.2 Update database service saveMeeting function
+  - Add data validation before Firestore operations
+  - Ensure metadata has default values
+  - Fix teamId handling to prevent undefined values
+  - _Requirements: 1.1, 1.2, 1.3, 6.1, 6.2, 6.3_
 
-- [x] 3. Fix Notification Service Integration
-  - Debug and fix notification loading failures
-  - Implement proper Firestore query permissions
-  - Add notification action handling (accept/decline invitations)
-  - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6_
+- [x] 1.3 Test meeting upload functionality
+  - Create test cases for meetings with and without teams
+  - Verify no undefined field errors occur
+  - Test metadata processing and defaults
+  - _Requirements: 1.1, 1.2, 1.3, 1.4_
 
-- [x] 4. Update Firestore Security Rules
-  - Fix team member access validation rules
-  - Add proper notification query permissions
-  - Implement user profile access rules
-  - _Requirements: 6.1, 6.2, 6.3, 6.4, 7.1, 7.2, 7.3, 7.4, 7.5_
+## Task 2: Fix User Profile Creation and Consistency
 
-## Phase 2: Team Management Integration
+- [x] 2.1 Implement automatic user profile creation
+  - Update authentication flow to create profiles on sign-in
+  - Ensure profiles created in both users and userProfiles collections
+  - Add profile creation to existing user reconciliation
+  - _Requirements: 2.1, 2.3, 8.1, 8.2_
 
-- [x] 5. Fix Team Member Management
-  - Implement proper team member addition functionality
-  - Fix team member removal and role updates
-  - Add real-time team member synchronization
-  - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5_
+- [x] 2.2 Fix user search functionality
+  - Update searchUserByEmail to check userProfiles collection
+  - Ensure consistent user data across collections
+  - Add fallback search methods for missing profiles
+  - _Requirements: 2.2, 2.4, 8.2, 8.3_
 
-- [x] 6. Implement Team Invitation System
-  - Create team invitation workflow
-  - Implement invitation notifications
-  - Add invitation acceptance/decline handling
-  - _Requirements: 1.3, 3.1, 3.2_
+- [x] 2.3 Create user data reconciliation service
+  - Implement function to fix inconsistent user data
+  - Add automatic profile creation for existing users
+  - Ensure searchable user data for team invitations
+  - _Requirements: 2.1, 2.2, 8.3, 8.4_
 
-- [x] 7. Fix Team Settings Management
-  - Implement team settings update functionality
-  - Add team deletion with proper cleanup
-  - Ensure team data consistency
-  - _Requirements: 1.2, 1.6, 7.5_
+## Task 3: Fix Team Invitation User ID Consistency
 
-## Phase 3: Meeting-Team Assignment Integration
+- [x] 3.1 Update team service invitation logic
+  - Ensure only real user IDs are used throughout invitation process
+  - Add strict user existence validation before invitations
+  - Remove any remaining temporary ID generation
+  - _Requirements: 3.1, 3.2, 2.4_
 
-- [x] 8. Implement Meeting-Team Assignment
-  - Modify meeting upload to respect team selection
-  - Ensure meetings assigned to teams appear in team section
-  - Update meeting processing service to handle team assignments
-  - _Requirements: 2.1, 2.2, 2.3_
+- [x] 3.2 Fix invitation acceptance workflow
+  - Update acceptTeamInvitation to handle user ID matching properly
+  - Ensure proper cleanup of any temporary records
+  - Add immediate team membership visibility
+  - _Requirements: 3.2, 3.3, 3.5_
 
-- [x] 9. Fix Team Meeting Display
-  - Update dashboard to show team meetings separately from personal meetings
-  - Implement team meeting filtering and display
-  - Add team meeting analytics integration
-  - _Requirements: 2.3, 2.5_
+- [x] 3.3 Test complete team invitation workflow
+  - Test invitation creation with real user IDs
+  - Verify invitation acceptance and team membership
+  - Ensure real-time updates work correctly
+  - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5_
 
-- [x] 10. Implement Team Meeting Notifications
-  - Send notifications to team members when meetings are assigned
-  - Add meeting update notifications for team members
-  - Implement meeting-related notification actions
-  - _Requirements: 2.4, 3.1, 3.2_
+## Task 4: Fix Team Meetings Integration
 
-## Phase 4: Real-time Synchronization
+- [x] 4.1 Update team meetings visibility logic
+  - Ensure team members see meetings assigned to their teams
+  - Fix team meeting queries and permissions
+  - Add proper team membership validation
+  - _Requirements: 4.1, 4.3_
 
-- [x] 11. Implement Real-time Team Updates
-  - Add real-time listeners for team data changes
-  - Ensure team member updates are reflected immediately
-  - Implement proper listener cleanup to prevent memory leaks
-  - _Requirements: 5.1, 5.4_
+- [x] 4.2 Fix team meeting notifications
+  - Ensure notifications sent to all active team members
+  - Update notification delivery for team meetings
+  - Add proper notification data structure
+  - _Requirements: 4.2, 4.4_
 
-- [x] 12. Add Real-time Notification Updates
-  - Implement real-time notification listeners
-  - Ensure new notifications appear without page refresh
-  - Add notification badge count updates
-  - _Requirements: 5.2, 3.6_
+- [x] 4.3 Test team meetings integration
+  - Verify team members see team meetings in dashboard
+  - Test meeting assignment and notification delivery
+  - Ensure real-time updates for team meetings
+  - _Requirements: 4.1, 4.2, 4.3, 4.4_
 
-- [x] 13. Implement Real-time Meeting Updates
-  - Add real-time listeners for meeting data changes
-  - Update dashboard immediately when meeting data changes
-  - Ensure team meeting updates are synchronized
-  - _Requirements: 5.3_
+## Task 5: Fix UI Component Errors
 
-## Phase 5: Error Handling and User Experience
+- [x] 5.1 Fix Select component value validation
+  - Add validation to ensure Select.Item values are non-empty
+  - Implement fallback values for empty data
+  - Update team report components with proper value handling
+  - _Requirements: 5.1, 5.3_
 
-- [x] 14. Implement Comprehensive Error Handling
-  - Add specific error messages for all database operations
-  - Implement retry mechanisms for failed operations
-  - Add proper authentication error handling
-  - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5_
+- [x] 5.2 Add UI error boundaries and safe rendering
+  - Implement error boundaries for critical components
+  - Add safe data rendering patterns
+  - Handle empty/null data gracefully in UI components
+  - _Requirements: 5.2, 5.3, 5.4_
 
-- [x] 15. Add Loading States and Error Recovery
-  - Implement loading states for all async operations
-  - Add retry buttons for failed operations
-  - Implement proper error boundaries
-  - _Requirements: 6.5_
-
-- [x] 16. Fix Settings Persistence
-  - Ensure user settings are properly saved to database
-  - Add settings validation and error handling
-  - Implement settings confirmation messages
-  - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5_
-
-## Phase 6: Testing and Validation
-
-- [x] 17. Create Integration Tests
-  - Write tests for team management workflow
-  - Test meeting-team assignment flow
-  - Validate notification system functionality
-  - _Requirements: All requirements validation_
-
-- [x] 18. Test Error Scenarios
-  - Test network failure scenarios
-  - Validate permission error handling
-  - Test concurrent user actions
-  - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5_
-
-- [x] 19. Performance Testing and Optimization
-  - Test real-time listener performance
-  - Optimize database queries
-  - Implement data caching where appropriate
+- [x] 5.3 Test UI components with edge cases
+  - Test components with empty data
+  - Verify error boundaries catch and handle errors
+  - Ensure graceful degradation for missing data
   - _Requirements: 5.1, 5.2, 5.3, 5.4_
 
-## Phase 7: Final Integration and Polish
+## Task 6: Fix Real-time Listeners and Permissions
 
-- [x] 20. End-to-End Integration Testing
-  - Test complete user workflows from start to finish
-  - Validate all features work together properly
-  - Ensure data consistency across all components
-  - _Requirements: All requirements final validation_
+- [x] 6.1 Update Firestore security rules for team operations
+  - Ensure proper permissions for team member operations
+  - Add rules for team meeting access
+  - Test rules with different user scenarios
+  - _Requirements: 7.1, 7.2_
 
-- [x] 21. User Experience Polish
-  - Add loading animations and transitions
-  - Implement proper success/error feedback
-  - Optimize mobile responsiveness
-  - _Requirements: User experience improvements_
+- [x] 6.2 Fix real-time listener error handling
+  - Add proper error handling for permission errors
+  - Implement graceful degradation for connection issues
+  - Add user-friendly error messages
+  - _Requirements: 7.3, 7.4_
 
-- [x] 22. Production Readiness
-  - Add monitoring and logging
-  - Implement proper error tracking
-  - Add performance monitoring
-  - _Requirements: Production deployment preparation_
+- [x] 6.3 Test real-time functionality
+  - Verify team updates propagate correctly
+  - Test permission scenarios and error handling
+  - Ensure offline/online transitions work smoothly
+  - _Requirements: 7.1, 7.2, 7.3, 7.4_
+
+## Task 7: Create Comprehensive Integration Tests
+
+- [x] 7.1 Test complete user onboarding workflow
+  - Test user sign-in and profile creation
+  - Verify user searchability for team invitations
+  - Test team creation and invitation sending
+  - _Requirements: 2.1, 2.2, 2.3, 3.1_
+
+- [x] 7.2 Test complete team collaboration workflow
+  - Test team invitation acceptance and membership
+  - Verify team meeting visibility and notifications
+  - Test meeting upload and team assignment
+  - _Requirements: 3.2, 3.3, 4.1, 4.2, 1.3_
+
+- [x] 7.3 Test error scenarios and edge cases
+  - Test with missing user profiles
+  - Test with network connectivity issues
+  - Test with invalid data and edge cases
+  - _Requirements: 5.3, 7.3, 6.1, 6.2_
+
+## Task 8: Performance and Monitoring
+
+- [x] 8.1 Add monitoring for critical operations
+  - Monitor meeting upload success rates
+  - Track team invitation completion rates
+  - Monitor user profile creation consistency
+  - _Requirements: All requirements - monitoring_
+
+- [x] 8.2 Optimize database queries and real-time listeners
+  - Optimize team member queries
+  - Improve real-time listener efficiency
+  - Add proper indexing for new query patterns
+  - _Requirements: 7.1, 7.2, 4.1_
+
+- [x] 8.3 Create system health dashboard
+  - Display key system metrics
+  - Show error rates and success rates
+  - Add alerts for critical failures
+  - _Requirements: All requirements - observability_

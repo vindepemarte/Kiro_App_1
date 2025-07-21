@@ -6,6 +6,7 @@ import React, { createContext, useContext, useEffect, useState, ReactNode } from
 import { authService } from '@/lib/auth';
 import { User, AuthState } from '@/lib/types';
 import { AuthError, AuthLoading } from '@/components/auth-error';
+import { userProfileConsistencyService } from '@/lib/user-profile-consistency';
 
 interface AuthContextType extends AuthState {
   signOut: () => Promise<void>;
@@ -33,8 +34,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
     const initAuth = async () => {
       try {
         // Set up auth state listener
-        const unsubscribe = authService.onAuthStateChanged((user) => {
+        const unsubscribe = authService.onAuthStateChanged(async (user) => {
           if (mounted) {
+            // If user signed in, ensure their profile exists
+            if (user && !user.isAnonymous) {
+              try {
+                await userProfileConsistencyService.ensureUserProfile(user);
+              } catch (error) {
+                console.warn('Failed to ensure user profile:', error);
+                // Don't fail auth if profile creation fails
+              }
+            }
+
             setAuthState(prev => ({
               ...prev,
               user,
