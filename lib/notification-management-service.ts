@@ -503,5 +503,4 @@ export function getNotificationManagementService(databaseService: DatabaseServic
   return notificationServiceInstance;
 }
 
-// Export the implementation class as well
-export { NotificationManagementServiceImpl };
+// NotificationManagementServiceImpl is already exported above as a class declaration
