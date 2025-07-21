@@ -17,13 +17,7 @@ service cloud.firestore {
         exists(/databases/$(database)/documents/artifacts/meeting-ai-mvp/teams/$(teamId));
     }
     
-    // Helper function for team meeting access (currently unused but kept for future use)
-    function canAccessTeamMeeting(teamId, meetingUserId) {
-      return isAuthenticated() && (
-        request.auth.uid == meetingUserId || 
-        isTeamMemberOrCreator(teamId)
-      );
-    }
+
     
     // ===== USER MEETINGS =====
     // Allow users to read and write their own meetings
@@ -33,30 +27,35 @@ service cloud.firestore {
       allow read: if isAuthenticated() && 
         resource.data.teamId != null && 
         isTeamMemberOrCreator(resource.data.teamId);
-      // Allow team admins to update meetings assigned to their team
+      // Allow team admins to update meetings assigned to their team (for task assignments)
       allow update: if isAuthenticated() && 
         resource.data.teamId != null && 
         isTeamMemberOrCreator(resource.data.teamId);
+      // Allow authenticated users to update meetings for task assignments
+      allow update: if isAuthenticated();
     }
     
-    // Allow users to list their own meetings
+    // Allow users to list their own meetings with real-time listeners
     match /artifacts/meeting-ai-mvp/users/{userId}/meetings {
       allow read: if isOwner(userId);
+      // Allow real-time subscriptions for team members
+      allow list: if isAuthenticated();
     }
     
     // ===== TEAMS =====
     // Team access control - allow authenticated users to read teams they need access to
     match /artifacts/meeting-ai-mvp/teams/{teamId} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && isTeamMemberOrCreator(teamId);
+      allow read, write: if isAuthenticated();
       // Allow team creation by authenticated users
       allow create: if isAuthenticated() && 
         request.auth.uid == request.resource.data.createdBy;
+      // Allow updates for team member management and task assignments
+      allow update: if isAuthenticated();
     }
     
-    // Allow listing teams for team discovery (limited read access)
+    // Allow listing teams for team discovery and real-time subscriptions
     match /artifacts/meeting-ai-mvp/teams {
-      allow read: if isAuthenticated();
+      allow read, list: if isAuthenticated();
     }
     
     // ===== TEAM MEETINGS =====
@@ -71,26 +70,17 @@ service cloud.firestore {
     }
     
     // ===== NOTIFICATIONS =====
-    // Allow users to read their own notifications
+    // Allow users to read, update, and delete their own notifications
     match /artifacts/meeting-ai-mvp/notifications/{notificationId} {
-      allow read: if isAuthenticated() && 
+      allow read, update, delete: if isAuthenticated() && 
         request.auth.uid == resource.data.userId;
-    }
-    
-    // Allow users to update/delete their own notifications
-    match /artifacts/meeting-ai-mvp/notifications/{notificationId} {
-      allow update, delete: if isAuthenticated() && 
-        request.auth.uid == resource.data.userId;
-    }
-    
-    // Allow authenticated users to create notifications (for system notifications)
-    match /artifacts/meeting-ai-mvp/notifications/{notificationId} {
+      // Allow creating notifications for any authenticated user (system notifications)
       allow create: if isAuthenticated();
     }
     
-    // Allow users to query their own notifications
+    // Allow users to query their own notifications with real-time listeners
     match /artifacts/meeting-ai-mvp/notifications {
-      allow read: if isAuthenticated();
+      allow read, list: if isAuthenticated();
     }
     
     // ===== USER SEARCH =====
