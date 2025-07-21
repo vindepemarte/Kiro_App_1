@@ -854,8 +854,8 @@ class FirestoreService implements DatabaseService {
       const assignerMember = team.members.find(member => member.userId === assignedBy);
       const assignerName = assignerMember?.displayName || 'Team member';
 
-      // Import simple notification service to avoid circular dependencies
-      const { notificationService } = await import('./notification-service-simple');
+      // Import notification service to avoid circular dependencies
+      const { notificationService } = await import('./notification-service');
       
       // Send meeting assignment notification
       await notificationService.sendMeetingAssignment(
@@ -883,8 +883,8 @@ class FirestoreService implements DatabaseService {
     updateType: string
   ): Promise<void> {
     try {
-      // Import simple notification service to avoid circular dependencies
-      const { notificationService } = await import('./notification-service-simple');
+      // Import notification service to avoid circular dependencies
+      const { notificationService } = await import('./notification-service');
       
       // Send meeting update notification
       await notificationService.sendMeetingUpdate(
@@ -913,8 +913,8 @@ class FirestoreService implements DatabaseService {
         return;
       }
 
-      // Import simple notification service to avoid circular dependencies
-      const { notificationService } = await import('./notification-service-simple');
+      // Import notification service to avoid circular dependencies
+      const { notificationService } = await import('./notification-service');
       
       // Get assignee information from team members (optimize by using existing data if available)
       let assigneeName = task.assigneeName || 'Unknown';

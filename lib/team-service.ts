@@ -684,4 +684,10 @@ export function getTeamService(databaseService: DatabaseService): TeamManagement
   return teamServiceInstance;
 }
 
+// Import database service and create the team service instance
+import { databaseService } from './database';
+
+// Create and export the team service instance
+export const teamService = getTeamService(databaseService);
+
 // TeamManagementService is already exported above

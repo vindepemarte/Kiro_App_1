@@ -216,7 +216,7 @@ describe('System Integration Tests', () => {
       });
       mockDatabaseService.createNotification.mockResolvedValue('notif-1');
 
-      await notificationService.sendTaskAssignmentNotification(
+      await notificationService.sendTaskAssignment(
         'task-1',
         'Complete authentication feature',
         'user-2',
@@ -268,7 +268,7 @@ describe('System Integration Tests', () => {
         }
       });
 
-      await notificationService.sendTaskAssignmentNotification(
+      await notificationService.sendTaskAssignment(
         'task-1',
         'Task description',
         'user-2',

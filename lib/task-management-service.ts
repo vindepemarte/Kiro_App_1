@@ -582,7 +582,7 @@ export class TaskManagementServiceImpl implements TaskManagementService {
       // Import notification service dynamically to avoid circular dependencies
       const { notificationService } = await import('./notification-service');
       
-      await notificationService.sendTaskAssignmentNotification(
+      await notificationService.sendTaskAssignment(
         taskId,
         taskDescription,
         assigneeId,

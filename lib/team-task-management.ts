@@ -488,7 +488,7 @@ export class TeamTaskManagementServiceImpl implements TeamTaskManagementService 
       const { notificationService } = await import('./notification-service');
 
       // Notify the new assignee
-      await notificationService.sendTaskAssignmentNotification(
+      await notificationService.sendTaskAssignment(
         history.taskId,
         `Task reassigned: ${history.taskId}`, // Would get actual task description
         history.newAssigneeId,

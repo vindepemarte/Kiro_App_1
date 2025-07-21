@@ -23,6 +23,16 @@ export const notificationService = {
     }
   },
   
+  // Add getUserNotifications method that the UI expects
+  async getUserNotifications(userId: string): Promise<any[]> {
+    try {
+      return await databaseService.getUserNotifications(userId);
+    } catch (error) {
+      console.error('Error getting user notifications:', error);
+      return [];
+    }
+  },
+  
   // Add getUnreadCount method that the UI expects
   async getUnreadCount(userId: string): Promise<number> {
     const notifications = await databaseService.getUserNotifications(userId);
@@ -70,16 +80,26 @@ export const notificationService = {
     teamId?: string,
     teamName?: string
   ): Promise<void> {
-    return await notificationManagementService.sendTaskAssignmentNotification(
-      taskId,
-      taskDescription,
-      assigneeId,
-      assigneeName,
-      meetingTitle,
-      assignedBy,
-      teamId,
-      teamName
-    );
+    try {
+      if (!notificationManagementService.sendTaskAssignmentNotification) {
+        console.error('sendTaskAssignmentNotification method not found on notification management service');
+        throw new Error('Notification service method not available');
+      }
+      
+      return await notificationManagementService.sendTaskAssignmentNotification(
+        taskId,
+        taskDescription,
+        assigneeId,
+        assigneeName,
+        meetingTitle,
+        assignedBy,
+        teamId,
+        teamName
+      );
+    } catch (error) {
+      console.error('Error in sendTaskAssignment:', error);
+      throw error;
+    }
   },
 
   async sendMeetingUpdate(
@@ -127,6 +147,55 @@ export const notificationService = {
     // Send notifications in batch
     await notificationManagementService.sendBulkNotifications(notifications);
     console.log(`Meeting update notifications sent to ${activeMembers.length} team members`);
+  },
+
+  // Add team invitation methods that the notification center expects
+  async acceptTeamInvitation(notificationId: string, userId: string): Promise<void> {
+    try {
+      // Get the notification to extract team invitation data
+      const notification = await databaseService.getUserNotifications(userId);
+      const teamInvitation = notification.find(n => n.id === notificationId && n.type === 'team_invitation');
+      
+      if (!teamInvitation) {
+        throw new Error('Team invitation notification not found');
+      }
+
+      // Import team service dynamically to avoid circular dependencies
+      const { teamService } = await import('./team-service');
+      
+      // Accept the team invitation using the team service
+      if (!teamInvitation.data.teamId) {
+        throw new Error('Team ID not found in invitation data');
+      }
+      await teamService.acceptTeamInvitation(teamInvitation.data.teamId, userId);
+      
+      // Mark the notification as read
+      await databaseService.markNotificationAsRead(notificationId);
+    } catch (error) {
+      console.error('Error accepting team invitation:', error);
+      throw error;
+    }
+  },
+
+  async declineTeamInvitation(notificationId: string, userId: string): Promise<void> {
+    try {
+      // Simply mark the notification as read and delete it
+      await databaseService.markNotificationAsRead(notificationId);
+      await databaseService.deleteNotification(notificationId);
+    } catch (error) {
+      console.error('Error declining team invitation:', error);
+      throw error;
+    }
+  },
+
+  // Add notification deletion method
+  async deleteNotification(notificationId: string): Promise<void> {
+    try {
+      await databaseService.deleteNotification(notificationId);
+    } catch (error) {
+      console.error('Error deleting notification:', error);
+      throw error;
+    }
   }
 };
 
