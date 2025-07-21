@@ -204,38 +204,67 @@ export class TaskManagementServiceImpl implements TaskManagementService {
 
         const allTasks: TaskWithContext[] = [];
 
-        // Get all user meetings
-        const userMeetings = await this.databaseService.getUserMeetings(userId);
+        // CRITICAL FIX: Get tasks from ALL sources, not just user's own meetings
         
-        // Get all teams the user is part of
+        // 1. Get user's own meetings (if they uploaded any)
+        try {
+          const userMeetings = await this.databaseService.getUserMeetings(userId);
+          for (const meeting of userMeetings) {
+            const meetingTasks = await this.extractTasksFromMeeting(meeting, meeting.teamId);
+            const userTasks = meetingTasks.filter(task => task.assigneeId === userId);
+            allTasks.push(...userTasks);
+          }
+        } catch (error) {
+          console.warn('Failed to load user meetings:', error);
+        }
+        
+        // 2. Get tasks from ALL team meetings (this is where assigned tasks will be)
         const userTeams = await this.databaseService.getUserTeams(userId);
         
-        // Get all team meetings
-        const teamMeetings: Meeting[] = [];
         for (const team of userTeams) {
           try {
-            const meetings = await this.databaseService.getTeamMeetings(team.id);
-            teamMeetings.push(...meetings);
+            const teamMeetings = await this.databaseService.getTeamMeetings(team.id);
+            for (const meeting of teamMeetings) {
+              const meetingTasks = await this.extractTasksFromMeeting(meeting, team.id);
+              const userTasks = meetingTasks.filter(task => task.assigneeId === userId);
+              allTasks.push(...userTasks);
+            }
           } catch (error) {
             console.warn(`Failed to load meetings for team ${team.name}:`, error);
           }
         }
 
-        // Combine and deduplicate meetings
-        const allMeetings = [...userMeetings, ...teamMeetings];
-        const uniqueMeetings = allMeetings.filter((meeting, index, self) => 
-          index === self.findIndex(m => m.id === meeting.id)
-        );
-
-        // Extract tasks assigned to the user from all meetings
-        for (const meeting of uniqueMeetings) {
-          const meetingTasks = await this.extractTasksFromMeeting(meeting, meeting.teamId);
-          const userTasks = meetingTasks.filter(task => task.assigneeId === userId);
-          allTasks.push(...userTasks);
+        // 3. ADDITIONAL FIX: Search across ALL meetings in the system for tasks assigned to this user
+        // This handles cases where tasks are assigned but not properly stored in team meetings
+        try {
+          // Get all users (this includes both real and fake users who uploaded meetings)
+          const allUsers = await this.getAllUsersWithMeetings();
+          
+          for (const otherUserId of allUsers) {
+            if (otherUserId === userId) continue; // Skip own meetings (already processed)
+            
+            try {
+              const otherUserMeetings = await this.databaseService.getUserMeetings(otherUserId);
+              for (const meeting of otherUserMeetings) {
+                const meetingTasks = await this.extractTasksFromMeeting(meeting, meeting.teamId);
+                const userTasks = meetingTasks.filter(task => task.assigneeId === userId);
+                allTasks.push(...userTasks);
+              }
+            } catch (error) {
+              // Silently continue if we can't access other user's meetings
+            }
+          }
+        } catch (error) {
+          console.warn('Failed to search across all meetings:', error);
         }
 
+        // Deduplicate tasks (same task might be found in multiple places)
+        const uniqueTasks = allTasks.filter((task, index, self) => 
+          index === self.findIndex(t => t.id === task.id && t.meetingId === task.meetingId)
+        );
+
         // Sort tasks by creation date (newest first)
-        return allTasks.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+        return uniqueTasks.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 
       } catch (error) {
         throw ErrorHandler.handleError(error, 'Get User Tasks');
@@ -247,6 +276,29 @@ export class TaskManagementServiceImpl implements TaskManagementService {
         return appError.retryable && !['VALIDATION_ERROR'].includes(appError.code);
       }
     });
+  }
+
+  // Helper method to get all users who have uploaded meetings
+  private async getAllUsersWithMeetings(): Promise<string[]> {
+    try {
+      // This is a simplified approach - in a real system you'd want to index this better
+      // For now, we'll get users from teams since team members are the ones who matter
+      const allTeams = await this.databaseService.getAllTeams();
+      const userIds = new Set<string>();
+      
+      for (const team of allTeams) {
+        for (const member of team.members) {
+          userIds.add(member.userId);
+        }
+        // Also add the team creator
+        userIds.add(team.createdBy);
+      }
+      
+      return Array.from(userIds);
+    } catch (error) {
+      console.warn('Failed to get all users with meetings:', error);
+      return [];
+    }
   }
 
   // Get all tasks for a specific team
@@ -309,8 +361,7 @@ export class TaskManagementServiceImpl implements TaskManagementService {
         const updatedActionItems = [...meeting.actionItems];
         updatedActionItems[taskIndex] = {
           ...updatedActionItems[taskIndex],
-          status: status,
-          updatedAt: new Date()
+          status: status
         };
 
         // Update the meeting with the new action items

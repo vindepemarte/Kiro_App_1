@@ -64,6 +64,7 @@ export interface DatabaseService {
   // Team management operations
   createTeam(teamData: CreateTeamData): Promise<string>;
   getUserTeams(userId: string): Promise<Team[]>;
+  getAllTeams(): Promise<Team[]>;
   getTeamById(teamId: string): Promise<Team | null>;
   updateTeam(teamId: string, updates: Partial<Team>): Promise<boolean>;
   deleteTeam(teamId: string, userId: string): Promise<boolean>;
@@ -696,6 +697,30 @@ class FirestoreService implements DatabaseService {
       const errorMessage = DatabaseUtils.isFirestoreError(error)
         ? this.handleFirestoreError(error)
         : `Failed to fetch teams: ${error instanceof Error ? error.message : 'Unknown error'}`;
+      
+      throw new Error(errorMessage);
+    }
+  }
+
+  // Get all teams (for task service to find all users with meetings)
+  async getAllTeams(): Promise<Team[]> {
+    try {
+      const teamsCollection = collection(this.db, this.getTeamsPath());
+      const querySnapshot = await getDocs(teamsCollection);
+      const teams: Team[] = [];
+
+      querySnapshot.forEach((doc) => {
+        const team = this.documentToTeam(doc);
+        if (team) {
+          teams.push(team);
+        }
+      });
+
+      return teams.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    } catch (error) {
+      const errorMessage = DatabaseUtils.isFirestoreError(error)
+        ? this.handleFirestoreError(error)
+        : `Failed to fetch all teams: ${error instanceof Error ? error.message : 'Unknown error'}`;
       
       throw new Error(errorMessage);
     }
@@ -1592,6 +1617,7 @@ export const databaseService = new Proxy({} as FirestoreService, {
 // Ensure methods are properly bound to prevent context loss
 export const createTeam = databaseService.createTeam.bind(databaseService);
 export const getUserTeams = databaseService.getUserTeams.bind(databaseService);
+export const getAllTeams = databaseService.getAllTeams.bind(databaseService);
 export const getTeamById = databaseService.getTeamById.bind(databaseService);
 export const updateTeam = databaseService.updateTeam.bind(databaseService);
 export const deleteTeam = databaseService.deleteTeam.bind(databaseService);
