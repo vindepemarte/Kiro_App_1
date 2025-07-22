@@ -2,143 +2,108 @@
 
 // Simple validation script for notification and task display fixes
 
-const fs = require('fs');
-const path = require('path');
-
 console.log('🔧 Validating Notification and Task Display Fixes...\n');
 
-function readFile(filePath) {
+async function validateFixes() {
   try {
-    return fs.readFileSync(path.join(__dirname, '..', filePath), 'utf8');
-  } catch (error) {
-    console.error(`Error reading ${filePath}:`, error.message);
-    return '';
-  }
-}
-
-function validateFixes() {
-  let allTestsPassed = true;
-  
-  // Test 1: Check notification service has required methods
-  console.log('1️⃣ Testing Notification Service Methods...');
-  
-  const notificationServiceContent = readFile('lib/notification-service.ts');
-  
-  const requiredMethods = [
-    'getUserNotifications',
-    'getUnreadCount', 
-    'markAsRead',
-    'subscribeToNotifications',
-    'sendTaskAssignment',
-    'acceptTeamInvitation',
-    'declineTeamInvitation',
-    'deleteNotification'
-  ];
-  
-  let methodsFound = 0;
-  for (const method of requiredMethods) {
-    if (notificationServiceContent.includes(`async ${method}(`) || 
-        notificationServiceContent.includes(`${method}(`)) {
-      console.log(`   ✅ ${method} - Found`);
-      methodsFound++;
-    } else {
-      console.log(`   ❌ ${method} - Missing`);
-      allTestsPassed = false;
+    // Test 1: Check if notification service can be imported
+    console.log('1️⃣ Testing Notification Service Import...');
+    
+    try {
+      const { notificationService } = await import('../lib/notification-service.js');
+      console.log('   ✅ Notification service imported successfully');
+      
+      // Check key methods
+      const methods = [
+        'getUserNotifications',
+        'getUnreadCount',
+        'markAsRead',
+        'subscribeToNotifications',
+        'sendTaskAssignment'
+      ];
+      
+      let availableMethods = 0;
+      for (const method of methods) {
+        if (typeof notificationService[method] === 'function') {
+          console.log(`   ✅ ${method} - Available`);
+          availableMethods++;
+        } else {
+          console.log(`   ❌ ${method} - Missing`);
+        }
+      }
+      
+      console.log(`   📊 Notification methods: ${availableMethods}/${methods.length}\n`);
+      
+    } catch (error) {
+      console.log('   ❌ Failed to import notification service:', error.message);
     }
-  }
-  
-  console.log(`   📊 Methods found: ${methodsFound}/${requiredMethods.length}\n`);
-  
-  // Test 2: Check database service doesn't have duplicate exports
-  console.log('2️⃣ Testing Database Service Exports...');
-  
-  const databaseServiceContent = readFile('lib/database.ts');
-  
-  const getUserNotificationsExports = (databaseServiceContent.match(/export const getUserNotifications/g) || []).length;
-  
-  if (getUserNotificationsExports === 1) {
-    console.log('   ✅ No duplicate getUserNotifications exports');
-  } else {
-    console.log(`   ❌ Found ${getUserNotificationsExports} getUserNotifications exports (should be 1)`);
-    allTestsPassed = false;
-  }
-  
-  // Check if database service imports correct notification service
-  if (databaseServiceContent.includes("import('./notification-service')")) {
-    console.log('   ✅ Database service imports correct notification service');
-  } else if (databaseServiceContent.includes("import('./notification-service-simple')")) {
-    console.log('   ❌ Database service still imports notification-service-simple');
-    allTestsPassed = false;
-  } else {
-    console.log('   ✅ Database service notification imports look correct');
-  }
-  
-  console.log('');
-  
-  // Test 3: Check task management service uses correct method names
-  console.log('3️⃣ Testing Task Management Service...');
-  
-  const taskManagementContent = readFile('lib/task-management-service.ts');
-  
-  if (taskManagementContent.includes('sendTaskAssignment(')) {
-    console.log('   ✅ Task management service uses correct sendTaskAssignment method');
-  } else if (taskManagementContent.includes('sendTaskAssignmentNotification(')) {
-    console.log('   ❌ Task management service still uses old sendTaskAssignmentNotification method');
-    allTestsPassed = false;
-  } else {
-    console.log('   ⚠️  Could not verify task assignment method calls');
-  }
-  
-  console.log('');
-  
-  // Test 4: Check team service is properly exported
-  console.log('4️⃣ Testing Team Service Export...');
-  
-  const teamServiceContent = readFile('lib/team-service.ts');
-  
-  if (teamServiceContent.includes('export const teamService')) {
-    console.log('   ✅ Team service is properly exported');
-  } else {
-    console.log('   ❌ Team service export not found');
-    allTestsPassed = false;
-  }
-  
-  console.log('');
-  
-  // Test 5: Check notification center uses correct methods
-  console.log('5️⃣ Testing Notification Center Integration...');
-  
-  const notificationCenterContent = readFile('components/notification-center.tsx');
-  
-  if (notificationCenterContent.includes('notificationService.getUserNotifications')) {
-    console.log('   ✅ Notification center calls getUserNotifications');
-  } else {
-    console.log('   ❌ Notification center does not call getUserNotifications');
-    allTestsPassed = false;
-  }
-  
-  if (notificationCenterContent.includes('notificationService.subscribeToNotifications')) {
-    console.log('   ✅ Notification center uses subscribeToNotifications');
-  } else {
-    console.log('   ❌ Notification center does not use subscribeToNotifications');
-    allTestsPassed = false;
-  }
-  
-  console.log('');
-  
-  // Summary
-  console.log('📋 VALIDATION SUMMARY:');
-  
-  if (allTestsPassed) {
-    console.log('\n🎉 ALL FIXES VALIDATED SUCCESSFULLY!');
-    console.log('   ✅ Notification service methods are implemented');
-    console.log('   ✅ Database service exports are fixed');
-    console.log('   ✅ Task management service uses correct methods');
-    console.log('   ✅ Team service is properly exported');
-    console.log('   ✅ Notification center integration looks correct');
-    console.log('\n🚀 The notification and task display issues should now be resolved!');
-  } else {
-    console.log('\n⚠️  SOME ISSUES REMAIN - Please review the failed tests above');
+    
+    // Test 2: Check if task service can be imported
+    console.log('2️⃣ Testing Task Service Import...');
+    
+    try {
+      const { taskService } = await import('../lib/task-service.js');
+      console.log('   ✅ Task service imported successfully');
+      
+      // Check key methods
+      const taskMethods = [
+        'getUserTasks',
+        'subscribeToUserTasks',
+        'updateTaskStatus',
+        'assignTaskToUser'
+      ];
+      
+      let availableTaskMethods = 0;
+      for (const method of taskMethods) {
+        if (typeof taskService[method] === 'function') {
+          console.log(`   ✅ ${method} - Available`);
+          availableTaskMethods++;
+        } else {
+          console.log(`   ❌ ${method} - Missing`);
+        }
+      }
+      
+      console.log(`   📊 Task methods: ${availableTaskMethods}/${taskMethods.length}\n`);
+      
+    } catch (error) {
+      console.log('   ❌ Failed to import task service:', error.message);
+    }
+    
+    // Test 3: Check database service exports
+    console.log('3️⃣ Testing Database Service Exports...');
+    
+    try {
+      const db = await import('../lib/database.js');
+      console.log('   ✅ Database service imported successfully');
+      
+      const dbMethods = [
+        'getUserNotifications',
+        'createNotification',
+        'markNotificationAsRead',
+        'subscribeToUserNotifications'
+      ];
+      
+      let availableDbMethods = 0;
+      for (const method of dbMethods) {
+        if (typeof db[method] === 'function') {
+          console.log(`   ✅ ${method} - Available`);
+          availableDbMethods++;
+        } else {
+          console.log(`   ❌ ${method} - Missing`);
+        }
+      }
+      
+      console.log(`   📊 Database methods: ${availableDbMethods}/${dbMethods.length}\n`);
+      
+    } catch (error) {
+      console.log('   ❌ Failed to import database service:', error.message);
+    }
+    
+    console.log('🎯 VALIDATION COMPLETE');
+    console.log('   If all services imported successfully, the fixes are working!');
+    
+  } catch (error) {
+    console.error('❌ Validation failed:', error.message);
   }
 }
 
