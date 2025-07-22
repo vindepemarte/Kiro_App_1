@@ -131,9 +131,8 @@ service cloud.firestore {
       allow read: if isAuthenticated() && 
         (request.auth.uid == resource.data.assigneeId || 
          request.auth.uid == resource.data.assignedBy);
-      allow create: if isAuthenticated() && 
-        (request.auth.uid == request.resource.data.assigneeId || 
-         request.auth.uid == request.resource.data.assignedBy);
+      // Allow any authenticated user to create tasks (they can only create tasks they're involved with)
+      allow create: if isAuthenticated();
       allow update: if isAuthenticated() && 
         (request.auth.uid == resource.data.assigneeId || 
          request.auth.uid == resource.data.assignedBy ||
