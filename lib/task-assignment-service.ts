@@ -185,6 +185,31 @@ export class TaskAssignmentServiceImpl implements TaskAssignmentService {
       );
 
       if (success) {
+        // CRITICAL FIX: Create task document in dedicated tasks collection
+        try {
+          await this.databaseService.createTask({
+            id: updatedActionItems[taskIndex].id,
+            description: updatedActionItems[taskIndex].description,
+            assigneeId: assigneeId,
+            assigneeName: assignee.displayName,
+            assignedBy: assignedBy,
+            assignedAt: new Date(),
+            status: updatedActionItems[taskIndex].status,
+            priority: updatedActionItems[taskIndex].priority,
+            deadline: updatedActionItems[taskIndex].deadline,
+            meetingId: meetingId,
+            meetingTitle: meeting.title,
+            meetingDate: meeting.date,
+            teamId: meeting.teamId,
+            teamName: meeting.teamId ? await this.getTeamName(meeting.teamId) : undefined,
+            owner: updatedActionItems[taskIndex].owner
+          });
+          console.log(`✅ Task document created in tasks collection for task ${taskId}`);
+        } catch (taskCreationError) {
+          console.error('Failed to create task document:', taskCreationError);
+          // Don't fail the entire assignment if task document creation fails
+        }
+
         // Send notification to new assignee
         await this.sendTaskAssignmentNotification(
           updatedActionItems[taskIndex], 
@@ -508,6 +533,16 @@ export class TaskAssignmentServiceImpl implements TaskAssignmentService {
     } catch (error) {
       console.error('Error getting team member info:', error);
       return null;
+    }
+  }
+
+  private async getTeamName(teamId: string): Promise<string | undefined> {
+    try {
+      const team = await this.databaseService.getTeamById(teamId);
+      return team?.name;
+    } catch (error) {
+      console.error('Error getting team name:', error);
+      return undefined;
     }
   }
 

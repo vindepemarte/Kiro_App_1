@@ -91,6 +91,28 @@ export interface DatabaseService {
   updateTaskStatus(meetingId: string, taskId: string, status: ActionItem['status']): Promise<boolean>;
   getTeamTasks(teamId: string): Promise<ActionItem[]>;
   
+  // Task collection operations
+  createTask(task: {
+    id: string;
+    description: string;
+    assigneeId: string;
+    assigneeName: string;
+    assignedBy: string;
+    assignedAt: Date;
+    status: ActionItem['status'];
+    priority: ActionItem['priority'];
+    deadline?: Date;
+    meetingId: string;
+    meetingTitle: string;
+    meetingDate: Date;
+    teamId?: string;
+    teamName?: string;
+    owner?: string;
+  }): Promise<string>;
+  getUserTasksFromCollection(userId: string): Promise<any[]>;
+  updateTaskInCollection(taskId: string, updates: Partial<any>): Promise<boolean>;
+  subscribeToUserTasksFromCollection(userId: string, callback: (tasks: any[]) => void): Unsubscribe;
+  
   // Notification operations
   createNotification(notification: CreateNotificationData): Promise<string>;
   getUserNotifications(userId: string): Promise<Notification[]>;
@@ -1570,6 +1592,207 @@ class FirestoreService implements DatabaseService {
         callback(null);
       }
     );
+  }
+
+  // ===== TASK COLLECTION OPERATIONS =====
+  
+  // Create a task in the dedicated tasks collection
+  async createTask(task: {
+    id: string;
+    description: string;
+    assigneeId: string;
+    assigneeName: string;
+    assignedBy: string;
+    assignedAt: Date;
+    status: ActionItem['status'];
+    priority: ActionItem['priority'];
+    deadline?: Date;
+    meetingId: string;
+    meetingTitle: string;
+    meetingDate: Date;
+    teamId?: string;
+    teamName?: string;
+    owner?: string;
+  }): Promise<string> {
+    try {
+      const tasksCollection = collection(this.db, this.getTasksPath());
+      
+      const taskData = {
+        id: task.id,
+        description: task.description,
+        assigneeId: task.assigneeId,
+        assigneeName: task.assigneeName,
+        assignedBy: task.assignedBy,
+        assignedAt: Timestamp.fromDate(task.assignedAt),
+        status: task.status,
+        priority: task.priority,
+        deadline: task.deadline ? Timestamp.fromDate(task.deadline) : null,
+        meetingId: task.meetingId,
+        meetingTitle: task.meetingTitle,
+        meetingDate: Timestamp.fromDate(task.meetingDate),
+        teamId: task.teamId || null,
+        teamName: task.teamName || null,
+        owner: task.owner || null,
+        createdAt: Timestamp.fromDate(new Date()),
+        updatedAt: Timestamp.fromDate(new Date())
+      };
+
+      const docRef = await addDoc(tasksCollection, taskData);
+      console.log(`Task created in collection with ID: ${docRef.id}`);
+      return docRef.id;
+    } catch (error) {
+      console.error('Error creating task in collection:', error);
+      const errorMessage = DatabaseUtils.isFirestoreError(error)
+        ? this.handleFirestoreError(error)
+        : `Failed to create task: ${error instanceof Error ? error.message : 'Unknown error'}`;
+      
+      throw new Error(errorMessage);
+    }
+  }
+
+  // Get all tasks assigned to a user from the tasks collection
+  async getUserTasksFromCollection(userId: string): Promise<any[]> {
+    try {
+      const tasksCollection = collection(this.db, this.getTasksPath());
+      const q = query(
+        tasksCollection,
+        where('assigneeId', '==', userId),
+        orderBy('createdAt', 'desc')
+      );
+      
+      const querySnapshot = await getDocs(q);
+      const tasks: any[] = [];
+
+      querySnapshot.forEach((doc) => {
+        const data = doc.data();
+        const task = {
+          id: data.id,
+          description: data.description,
+          assigneeId: data.assigneeId,
+          assigneeName: data.assigneeName,
+          assignedBy: data.assignedBy,
+          assignedAt: data.assignedAt?.toDate() || new Date(),
+          status: data.status,
+          priority: data.priority,
+          deadline: data.deadline?.toDate(),
+          meetingId: data.meetingId,
+          meetingTitle: data.meetingTitle,
+          meetingDate: data.meetingDate?.toDate() || new Date(),
+          teamId: data.teamId,
+          teamName: data.teamName,
+          owner: data.owner,
+          createdAt: data.createdAt?.toDate() || new Date(),
+          updatedAt: data.updatedAt?.toDate() || new Date(),
+          firestoreId: doc.id
+        };
+        tasks.push(task);
+      });
+
+      return tasks;
+    } catch (error) {
+      console.error('Error getting user tasks from collection:', error);
+      const errorMessage = DatabaseUtils.isFirestoreError(error)
+        ? this.handleFirestoreError(error)
+        : `Failed to fetch user tasks: ${error instanceof Error ? error.message : 'Unknown error'}`;
+      
+      throw new Error(errorMessage);
+    }
+  }
+
+  // Update a task in the tasks collection
+  async updateTaskInCollection(taskId: string, updates: Partial<any>): Promise<boolean> {
+    try {
+      const tasksCollection = collection(this.db, this.getTasksPath());
+      
+      // Find the task document by the task ID field (not the Firestore document ID)
+      const q = query(tasksCollection, where('id', '==', taskId));
+      const querySnapshot = await getDocs(q);
+      
+      if (querySnapshot.empty) {
+        console.warn(`Task with ID ${taskId} not found in collection`);
+        return false;
+      }
+
+      // Update the first matching document
+      const taskDoc = querySnapshot.docs[0];
+      const updateData = {
+        ...updates,
+        updatedAt: Timestamp.fromDate(new Date())
+      };
+
+      // Convert Date objects to Timestamps
+      if (updates.deadline && updates.deadline instanceof Date) {
+        updateData.deadline = Timestamp.fromDate(updates.deadline);
+      }
+      if (updates.assignedAt && updates.assignedAt instanceof Date) {
+        updateData.assignedAt = Timestamp.fromDate(updates.assignedAt);
+      }
+
+      await updateDoc(taskDoc.ref, updateData);
+      console.log(`Task ${taskId} updated in collection`);
+      return true;
+    } catch (error) {
+      console.error('Error updating task in collection:', error);
+      const errorMessage = DatabaseUtils.isFirestoreError(error)
+        ? this.handleFirestoreError(error)
+        : `Failed to update task: ${error instanceof Error ? error.message : 'Unknown error'}`;
+      
+      throw new Error(errorMessage);
+    }
+  }
+
+  // Subscribe to real-time updates for user tasks from the tasks collection
+  subscribeToUserTasksFromCollection(userId: string, callback: (tasks: any[]) => void): Unsubscribe {
+    try {
+      const tasksCollection = collection(this.db, this.getTasksPath());
+      const q = query(
+        tasksCollection,
+        where('assigneeId', '==', userId),
+        orderBy('createdAt', 'desc')
+      );
+
+      return onSnapshot(q, (querySnapshot) => {
+        const tasks: any[] = [];
+        
+        querySnapshot.forEach((doc) => {
+          const data = doc.data();
+          const task = {
+            id: data.id,
+            description: data.description,
+            assigneeId: data.assigneeId,
+            assigneeName: data.assigneeName,
+            assignedBy: data.assignedBy,
+            assignedAt: data.assignedAt?.toDate() || new Date(),
+            status: data.status,
+            priority: data.priority,
+            deadline: data.deadline?.toDate(),
+            meetingId: data.meetingId,
+            meetingTitle: data.meetingTitle,
+            meetingDate: data.meetingDate?.toDate() || new Date(),
+            teamId: data.teamId,
+            teamName: data.teamName,
+            owner: data.owner,
+            createdAt: data.createdAt?.toDate() || new Date(),
+            updatedAt: data.updatedAt?.toDate() || new Date(),
+            firestoreId: doc.id
+          };
+          tasks.push(task);
+        });
+
+        callback(tasks);
+      }, (error) => {
+        console.error('Error in user tasks subscription:', error);
+        callback([]);
+      });
+    } catch (error) {
+      console.error('Failed to subscribe to user tasks:', error);
+      return () => {};
+    }
+  }
+
+  // Helper method to get the tasks collection path
+  private getTasksPath(): string {
+    return `artifacts/${this.appId}/tasks`;
   }
 
   // Enable offline support

@@ -130,6 +130,31 @@ export class TaskManagementServiceImpl implements TaskManagementService {
           actionItems: updatedActionItems 
         });
 
+        // CRITICAL FIX: Create task document in dedicated tasks collection
+        try {
+          await this.databaseService.createTask({
+            id: updatedActionItems[taskIndex].id,
+            description: updatedActionItems[taskIndex].description,
+            assigneeId: userId,
+            assigneeName: assigneeName,
+            assignedBy: assignedBy,
+            assignedAt: new Date(),
+            status: updatedActionItems[taskIndex].status,
+            priority: updatedActionItems[taskIndex].priority,
+            deadline: updatedActionItems[taskIndex].deadline,
+            meetingId: meetingId,
+            meetingTitle: meeting.title,
+            meetingDate: meeting.date,
+            teamId: meeting.teamId,
+            teamName: meeting.teamId ? (await this.databaseService.getTeamById(meeting.teamId))?.name : undefined,
+            owner: updatedActionItems[taskIndex].owner
+          });
+          console.log(`✅ Task document created in tasks collection for task ${taskId}`);
+        } catch (taskCreationError) {
+          console.error('Failed to create task document:', taskCreationError);
+          // Don't fail the entire assignment if task document creation fails
+        }
+
         // Get team information for notification context
         let teamName: string | undefined;
         if (meeting.teamId) {
@@ -204,9 +229,40 @@ export class TaskManagementServiceImpl implements TaskManagementService {
 
         const allTasks: TaskWithContext[] = [];
 
-        // CRITICAL FIX: Get tasks from ALL sources, not just user's own meetings
+        // CRITICAL FIX: Get tasks from ALL sources, including dedicated tasks collection
         
-        // 1. Get user's own meetings (if they uploaded any)
+        // 1. FIRST: Try to get tasks from the dedicated tasks collection
+        try {
+          const tasksFromCollection = await this.databaseService.getUserTasksFromCollection(userId);
+          console.log(`Found ${tasksFromCollection.length} tasks in dedicated tasks collection`);
+          
+          // Convert to TaskWithContext format
+          const collectionTasks: TaskWithContext[] = tasksFromCollection.map(task => ({
+            id: task.id,
+            description: task.description,
+            owner: task.owner,
+            assigneeId: task.assigneeId,
+            assigneeName: task.assigneeName,
+            deadline: task.deadline,
+            priority: task.priority,
+            status: task.status,
+            assignedBy: task.assignedBy,
+            assignedAt: task.assignedAt,
+            meetingId: task.meetingId,
+            meetingTitle: task.meetingTitle,
+            meetingDate: task.meetingDate,
+            teamId: task.teamId,
+            teamName: task.teamName,
+            createdAt: task.createdAt,
+            updatedAt: task.updatedAt
+          }));
+          
+          allTasks.push(...collectionTasks);
+        } catch (error) {
+          console.warn('Failed to load tasks from collection, falling back to meeting-based approach:', error);
+        }
+        
+        // 2. FALLBACK: Get user's own meetings (if they uploaded any)
         try {
           const userMeetings = await this.databaseService.getUserMeetings(userId);
           for (const meeting of userMeetings) {

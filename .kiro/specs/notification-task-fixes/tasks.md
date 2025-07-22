@@ -142,3 +142,23 @@
   - Test task system with large numbers of tasks
   - Verify real-time updates perform well
   - _Requirements: All requirements - performance_
+
+## Task 8: Create Dedicated Task Collection System
+
+- [x] 8.1 Create dedicated task collection in Firestore
+  - Add task creation to database service when tasks are assigned
+  - Store tasks in `artifacts/meeting-ai-mvp/tasks` collection
+  - Maintain reference to original meeting and action item
+  - _Requirements: 3.1, 3.2, 6.1_
+
+- [x] 8.2 Update task assignment to create task documents
+  - Modify task assignment service to create task documents
+  - Ensure task documents have all required fields
+  - Maintain backward compatibility with meeting action items
+  - _Requirements: 2.1, 3.1, 6.1_
+
+- [x] 8.3 Update task service to read from task collection
+  - Modify getUserTasks to read from dedicated task collection
+  - Add fallback to read from meeting action items
+  - Ensure real-time subscriptions work with task collection
+  - _Requirements: 3.1, 3.2, 3.4, 6.1_

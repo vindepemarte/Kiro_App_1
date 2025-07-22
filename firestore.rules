@@ -125,6 +125,23 @@ service cloud.firestore {
       allow read: if isAuthenticated();
     }
     
+    // ===== TASKS COLLECTION =====
+    // Allow users to read tasks assigned to them and create/update tasks
+    match /artifacts/meeting-ai-mvp/tasks/{taskId} {
+      allow read: if isAuthenticated() && 
+        (request.auth.uid == resource.data.assigneeId || 
+         request.auth.uid == resource.data.assignedBy);
+      allow create, update: if isAuthenticated();
+      allow delete: if isAuthenticated() && 
+        (request.auth.uid == resource.data.assigneeId || 
+         request.auth.uid == resource.data.assignedBy);
+    }
+    
+    // Allow users to query tasks assigned to them
+    match /artifacts/meeting-ai-mvp/tasks {
+      allow read, list: if isAuthenticated();
+    }
+    
     // ===== SECURITY FALLBACK =====
     // Deny all other access by default
     match /{document=**} {
