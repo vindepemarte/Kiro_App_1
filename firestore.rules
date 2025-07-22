@@ -131,7 +131,14 @@ service cloud.firestore {
       allow read: if isAuthenticated() && 
         (request.auth.uid == resource.data.assigneeId || 
          request.auth.uid == resource.data.assignedBy);
-      allow create, update: if isAuthenticated();
+      allow create: if isAuthenticated() && 
+        (request.auth.uid == request.resource.data.assigneeId || 
+         request.auth.uid == request.resource.data.assignedBy);
+      allow update: if isAuthenticated() && 
+        (request.auth.uid == resource.data.assigneeId || 
+         request.auth.uid == resource.data.assignedBy ||
+         request.auth.uid == request.resource.data.assigneeId || 
+         request.auth.uid == request.resource.data.assignedBy);
       allow delete: if isAuthenticated() && 
         (request.auth.uid == resource.data.assigneeId || 
          request.auth.uid == resource.data.assignedBy);
