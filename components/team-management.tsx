@@ -121,19 +121,31 @@ export function TeamManagement({ className }: TeamManagementProps) {
         throw new Error('Team creation is only available in browser environment')
       }
 
-      // Validate database service
-      if (!databaseService) {
-        throw new Error('Database service is not available')
-      }
-
       const teamData: CreateTeamData = {
         name: createTeamForm.name.trim(),
         description: createTeamForm.description.trim(),
         createdBy: user.uid
       }
 
-      // Use bound createTeam function to prevent context loss
-      const teamId = await createTeam(teamData)
+      try {
+        // Try to use the API client first (which uses PostgreSQL on the server)
+        const { createTeam: apiCreateTeam } = await import('@/lib/api-client');
+        const teamId = await apiCreateTeam(teamData);
+        console.log('Team created using API client (PostgreSQL):', teamId);
+      } catch (apiError) {
+        console.error('Error creating team with API client:', apiError);
+        
+        // Fall back to the database service
+        console.log('Falling back to database service...');
+        
+        // Validate database service
+        if (!databaseService) {
+          throw new Error('Database service is not available');
+        }
+        
+        // Use bound createTeam function to prevent context loss
+        await createTeam(teamData);
+      }
       
       // Reset form and close dialog
       setCreateTeamForm({ name: '', description: '' })

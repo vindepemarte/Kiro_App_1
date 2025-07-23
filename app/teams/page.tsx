@@ -47,23 +47,42 @@ export default function TeamsPage() {
     setTeamsLoading(true)
     setTeamsError(null)
 
-    try {
-      const unsubscribe = databaseService.subscribeToUserTeams(
-        user.uid,
-        (userTeams) => {
-          setTeams(userTeams)
-          setTeamsLoading(false)
+    // Try to use the API client first (which uses PostgreSQL on the server)
+    const fetchTeams = async () => {
+      try {
+        // Import the API client dynamically to avoid issues during build
+        const { getUserTeams } = await import('@/lib/api-client');
+        const userTeams = await getUserTeams(user.uid);
+        setTeams(userTeams);
+        setTeamsLoading(false);
+        console.log('Teams loaded from API client (PostgreSQL):', userTeams);
+      } catch (apiError) {
+        console.error('Error loading teams from API client:', apiError);
+        
+        // Fall back to the database service if the API client fails
+        try {
+          console.log('Falling back to database service...');
+          const unsubscribe = databaseService.subscribeToUserTeams(
+            user.uid,
+            (userTeams) => {
+              setTeams(userTeams);
+              setTeamsLoading(false);
+              console.log('Teams loaded from database service:', userTeams);
+            }
+          );
+          
+          return () => {
+            unsubscribe();
+          };
+        } catch (dbError) {
+          console.error('Error loading teams from database service:', dbError);
+          setTeamsError('Failed to load teams');
+          setTeamsLoading(false);
         }
-      )
-
-      return () => {
-        unsubscribe()
       }
-    } catch (error) {
-      console.error('Error loading teams:', error)
-      setTeamsError('Failed to load teams')
-      setTeamsLoading(false)
-    }
+    };
+    
+    fetchTeams();
   }, [user])
 
   const handleLogout = async () => {

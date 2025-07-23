@@ -60,7 +60,11 @@ if (typeof window === 'undefined') {
 // Create a function to get the database service instance
 // This will be used by the proxy to get the instance on demand
 function getDatabaseServiceInstance(): DatabaseService {
-  return getFactoryDatabaseService();
+  // Try to use the factory with PostgreSQL priority
+  console.log('[DATABASE] Getting database service instance');
+  const service = getFactoryDatabaseService();
+  console.log(`[DATABASE] Using database service: ${service.constructor.name}`);
+  return service;
 }
 
 // Database utility functions
@@ -1874,7 +1878,7 @@ export const databaseService = new Proxy({} as DatabaseService, {
       return async (...args: any[]) => {
         const { getRuntimeDatabaseService } = await import('./database-factory');
         const instance = await getRuntimeDatabaseService();
-        console.log(`Using database service: ${instance.constructor.name} for method: ${String(prop)}`);
+        console.log(`[SERVER] Using database service: ${instance.constructor.name} for method: ${String(prop)}`);
         const value = (instance as any)[prop];
         if (typeof value === 'function') {
           return value.apply(instance, args);
@@ -1882,11 +1886,17 @@ export const databaseService = new Proxy({} as DatabaseService, {
         return value;
       };
     } else {
-      // For client-side, use the synchronous version
+      // For client-side, we need to use API routes for database operations
+      // But for now, we'll use the synchronous version with more logging
+      console.log(`[CLIENT] Accessing database method: ${String(prop)}`);
       const instance = getDatabaseServiceInstance();
+      console.log(`[CLIENT] Using database service: ${instance.constructor.name}`);
       const value = (instance as any)[prop];
       if (typeof value === 'function') {
-        return value.bind(instance);
+        return function(...args: any[]) {
+          console.log(`[CLIENT] Calling database method: ${String(prop)} with args:`, args);
+          return value.apply(instance, args);
+        };
       }
       return value;
     }
