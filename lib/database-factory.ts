@@ -61,6 +61,55 @@ export function getDatabaseService(): DatabaseService {
 }
 
 /**
+ * This function is called at runtime to determine which database service to use
+ * It's used by the API routes and server components
+ */
+export async function initializeDatabaseService(): Promise<void> {
+  if (typeof window !== 'undefined') {
+    console.log('Client-side: Using Firebase');
+    return;
+  }
+
+  // Check environment variables
+  const usePostgres = process.env.USE_POSTGRES === 'true';
+  const usePostgresUnderscore = process.env.USE_POSTGRES === 'true';
+  const USE_POSTGRES = usePostgres || usePostgresUnderscore;
+  const DATABASE_URL = process.env.DATABASE_URL;
+  
+  console.log('Runtime database check:', {
+    USE_POSTGRES,
+    DATABASE_URL: DATABASE_URL ? 'Set (value hidden)' : 'Not set'
+  });
+  
+  if (USE_POSTGRES && DATABASE_URL) {
+    try {
+      // Test PostgreSQL connection
+      const { Pool } = await import('pg');
+      const pool = new Pool({
+        connectionString: DATABASE_URL,
+        connectionTimeoutMillis: 5000,
+      });
+      
+      const client = await pool.connect();
+      try {
+        const res = await client.query('SELECT version()');
+        console.log('PostgreSQL connection successful:', res.rows[0].version);
+        console.log('RUNTIME DATABASE MODE: PostgreSQL');
+      } finally {
+        client.release();
+      }
+      
+      await pool.end();
+    } catch (error) {
+      console.error('PostgreSQL connection failed:', error);
+      console.log('RUNTIME DATABASE MODE: Firebase (PostgreSQL connection failed)');
+    }
+  } else {
+    console.log('RUNTIME DATABASE MODE: Firebase (PostgreSQL not configured)');
+  }
+}
+
+/**
  * Get both database services for migration purposes
  * This should only be used in server-side scripts
  */
