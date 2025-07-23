@@ -60,60 +60,55 @@ export function getDatabaseService(): DatabaseService {
   return new FirestoreService();
 }
 
+// Cache for the database service instance
+let cachedDatabaseService: DatabaseService | null = null;
+
 /**
- * This function is called at runtime to determine which database service to use
- * It's used by the API routes and server components
+ * Get the database service with runtime detection
+ * This function will be called on-demand and cache the result
  */
-export async function initializeDatabaseService(): Promise<void> {
-  if (typeof window !== 'undefined') {
-    console.log('Client-side: Using Firebase');
-    return;
+export async function getRuntimeDatabaseService(): Promise<DatabaseService> {
+  // Return cached instance if available
+  if (cachedDatabaseService) {
+    return cachedDatabaseService;
   }
 
-  // Check environment variables
+  // Check environment variables at runtime
   const usePostgres = process.env.USE_POSTGRES === 'true';
   const usePostgresUnderscore = process.env.USE_POSTGRES === 'true';
   const USE_POSTGRES = usePostgres || usePostgresUnderscore;
   const DATABASE_URL = process.env.DATABASE_URL;
   
-  console.log('Runtime database check:', {
+  console.log('Runtime database service initialization:', {
     USE_POSTGRES,
-    DATABASE_URL: DATABASE_URL ? 'Set (value hidden)' : 'Not set'
+    DATABASE_URL: DATABASE_URL ? 'Set (value hidden)' : 'Not set',
+    isServer: typeof window === 'undefined'
   });
   
-  if (USE_POSTGRES && DATABASE_URL) {
+  if (USE_POSTGRES && typeof window === 'undefined' && DATABASE_URL) {
     try {
-      // Test PostgreSQL connection
-      const { Pool } = await import('pg');
-      const pool = new Pool({
-        connectionString: DATABASE_URL,
-        connectionTimeoutMillis: 5000,
-      });
-      
-      const client = await pool.connect();
-      try {
-        const res = await client.query('SELECT version()');
-        console.log('PostgreSQL connection successful:', res.rows[0].version);
-        console.log('RUNTIME DATABASE MODE: PostgreSQL');
-      } finally {
-        client.release();
-      }
-      
-      await pool.end();
+      console.log('Attempting to use PostgreSQL adapter');
+      // Dynamic import of PostgreSQL adapter (server-side only)
+      const { PostgresAdapter } = await import('./postgres-adapter');
+      cachedDatabaseService = new PostgresAdapter();
+      console.log('RUNTIME DATABASE MODE: PostgreSQL');
+      return cachedDatabaseService;
     } catch (error) {
-      console.error('PostgreSQL connection failed:', error);
-      console.log('RUNTIME DATABASE MODE: Firebase (PostgreSQL connection failed)');
+      console.error('Failed to initialize PostgreSQL adapter, falling back to Firebase:', error);
     }
-  } else {
-    console.log('RUNTIME DATABASE MODE: Firebase (PostgreSQL not configured)');
   }
+  
+  // Use Firebase as fallback
+  console.log('RUNTIME DATABASE MODE: Firebase');
+  cachedDatabaseService = new FirestoreService();
+  return cachedDatabaseService;
 }
 
 /**
  * Get both database services for migration purposes
  * This should only be used in server-side scripts
  */
-export function getDatabaseServices() {
+export async function getDatabaseServices() {
   if (typeof window !== 'undefined') {
     throw new Error('getDatabaseServices can only be used on the server');
   }
@@ -121,12 +116,12 @@ export function getDatabaseServices() {
   const firebase = new FirestoreService();
   let postgres = null;
 
-  if (PostgresAdapter) {
-    try {
-      postgres = new PostgresAdapter();
-    } catch (error) {
-      console.error('Failed to initialize PostgreSQL adapter for migration:', error);
-    }
+  try {
+    // Dynamic import of PostgreSQL adapter
+    const { PostgresAdapter } = await import('./postgres-adapter');
+    postgres = new PostgresAdapter();
+  } catch (error) {
+    console.error('Failed to initialize PostgreSQL adapter for migration:', error);
   }
 
   return { firebase, postgres };

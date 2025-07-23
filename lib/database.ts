@@ -1868,12 +1868,27 @@ function getDatabaseService(): DatabaseService {
 // Export the database service with proper method binding
 export const databaseService = new Proxy({} as DatabaseService, {
   get(target, prop) {
-    const instance = getDatabaseServiceInstance();
-    const value = (instance as any)[prop];
-    if (typeof value === 'function') {
-      return value.bind(instance);
+    // For server-side, use runtime detection
+    if (typeof window === 'undefined') {
+      // Return a promise-based proxy for server-side usage
+      return async (...args: any[]) => {
+        const { getRuntimeDatabaseService } = await import('./database-factory');
+        const instance = await getRuntimeDatabaseService();
+        const value = (instance as any)[prop];
+        if (typeof value === 'function') {
+          return value.apply(instance, args);
+        }
+        return value;
+      };
+    } else {
+      // For client-side, use the synchronous version (Firebase)
+      const instance = getDatabaseServiceInstance();
+      const value = (instance as any)[prop];
+      if (typeof value === 'function') {
+        return value.bind(instance);
+      }
+      return value;
     }
-    return value;
   }
 });
 
