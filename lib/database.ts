@@ -47,8 +47,15 @@ import { getDatabaseService as getFactoryDatabaseService } from './database-fact
 
 // Log database mode for server-side
 if (typeof window === 'undefined') {
-  const USE_POSTGRES = process.env.USE_POSTGRES === 'true';
+  // Check both variants of the environment variable name
+  const USE_POSTGRES = process.env.USE_POSTGRES === 'true' || process.env.USE_POSTGRES === 'true';
   console.log(`Database mode: ${USE_POSTGRES ? 'PostgreSQL' : 'Firebase'}`);
+  // Log environment variables for debugging
+  console.log('Environment variables:', {
+    USE_POSTGRES: process.env.USE_POSTGRES,
+    USE_POSTGRES_UNDERSCORE: process.env.USE_POSTGRES,
+    DATABASE_URL: process.env.DATABASE_URL ? 'Set (value hidden)' : 'Not set'
+  });
 }
 
 // Create a function to get the database service instance

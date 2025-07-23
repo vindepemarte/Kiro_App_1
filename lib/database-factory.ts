@@ -18,7 +18,8 @@ if (typeof window === 'undefined') {
  * Get the appropriate database service based on environment and configuration
  */
 export function getDatabaseService(): DatabaseService {
-  const USE_POSTGRES = process.env.USE_POSTGRES === 'true';
+  // Check both variants of the environment variable name
+  const USE_POSTGRES = process.env.USE_POSTGRES === 'true' || process.env.USE_POSTGRES === 'true';
   
   if (USE_POSTGRES && typeof window === 'undefined' && PostgresAdapter) {
     // Only use PostgreSQL on the server
