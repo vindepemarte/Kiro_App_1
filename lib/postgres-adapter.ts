@@ -17,10 +17,7 @@ import { v4 as uuidv4 } from 'uuid';
 // Type for unsubscribe function
 type Unsubscribe = () => void;
 
-// Create connection pool
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-});
+// Connection pool will be created in the constructor
 
 // Helper to convert database rows to application objects
 const rowToMeeting = (row: any): Meeting => {
@@ -86,11 +83,29 @@ const rowToNotification = (row: any): Notification => {
 // This adapter implements the same interface as your Firebase service
 // but uses PostgreSQL under the hood
 export class PostgresAdapter implements DatabaseService {
+  private pool: Pool;
+  
+  constructor() {
+    console.log('Initializing PostgreSQL adapter');
+    if (!process.env.DATABASE_URL) {
+      console.error('DATABASE_URL environment variable not set');
+      throw new Error('DATABASE_URL environment variable not set');
+    }
+    
+    this.pool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+    });
+    
+    // Test the connection
+    this.this.pool.query('SELECT NOW()')
+      .then(() => console.log('PostgreSQL connection successful'))
+      .catch(err => console.error('PostgreSQL connection error:', err));
+  }
   // Meeting operations
   async saveMeeting(userId: string, meeting: ProcessedMeeting, teamId?: string): Promise<string> {
     const meetingId = meeting.id || uuidv4();
     
-    await pool.query(
+    await this.pool.query(
       `INSERT INTO meetings (
         id, title, date, summary, transcript, raw_transcript, 
         action_items, key_points, team_id, user_id, created_at
@@ -124,7 +139,7 @@ export class PostgresAdapter implements DatabaseService {
   }
 
   async getUserMeetings(userId: string): Promise<Meeting[]> {
-    const result = await pool.query(
+    const result = await this.this.pool.query(
       'SELECT * FROM meetings WHERE user_id = $1 ORDER BY date DESC',
       [userId]
     );
@@ -133,7 +148,7 @@ export class PostgresAdapter implements DatabaseService {
   }
 
   async getMeetingById(meetingId: string, userId: string): Promise<Meeting | null> {
-    const result = await pool.query(
+    const result = await this.pool.query(
       'SELECT * FROM meetings WHERE id = $1 AND (user_id = $2 OR team_id IN (SELECT team_id FROM team_members WHERE user_id = $2))',
       [meetingId, userId]
     );
@@ -201,7 +216,7 @@ export class PostgresAdapter implements DatabaseService {
     values.push(meetingId);
     values.push(userId);
     
-    const result = await pool.query(
+    const result = await this.pool.query(
       `UPDATE meetings SET ${updateFields.join(', ')} 
        WHERE id = $${paramIndex++} AND (user_id = $${paramIndex} OR team_id IN (SELECT team_id FROM team_members WHERE user_id = $${paramIndex}))`,
       values
@@ -211,7 +226,7 @@ export class PostgresAdapter implements DatabaseService {
   }
 
   async deleteMeeting(meetingId: string, userId: string): Promise<boolean> {
-    const result = await pool.query(
+    const result = await this.pool.query(
       'DELETE FROM meetings WHERE id = $1 AND user_id = $2',
       [meetingId, userId]
     );
@@ -221,7 +236,7 @@ export class PostgresAdapter implements DatabaseService {
 
   // Team operations
   async getTeamMeetings(teamId: string): Promise<Meeting[]> {
-    const result = await pool.query(
+    const result = await this.pool.query(
       'SELECT * FROM meetings WHERE team_id = $1 ORDER BY date DESC',
       [teamId]
     );
@@ -232,14 +247,14 @@ export class PostgresAdapter implements DatabaseService {
   async createTeam(teamData: CreateTeamData): Promise<string> {
     const teamId = uuidv4();
     
-    await pool.query(
+    await this.pool.query(
       `INSERT INTO teams (id, name, description, created_by, created_at)
        VALUES ($1, $2, $3, $4, $5)`,
       [teamId, teamData.name, teamData.description || null, teamData.createdBy, new Date()]
     );
     
     // Add creator as team member
-    await pool.query(
+    await this.pool.query(
       `INSERT INTO team_members (team_id, user_id, role, status, joined_at)
        VALUES ($1, $2, $3, $4, $5)`,
       [teamId, teamData.createdBy, 'admin', 'active', new Date()]
@@ -249,7 +264,7 @@ export class PostgresAdapter implements DatabaseService {
   }
 
   async getUserTeams(userId: string): Promise<Team[]> {
-    const result = await pool.query(
+    const result = await this.pool.query(
       `SELECT t.* FROM teams t
        JOIN team_members tm ON t.id = tm.team_id
        WHERE tm.user_id = $1 AND tm.status = 'active'
@@ -261,7 +276,7 @@ export class PostgresAdapter implements DatabaseService {
     
     // Get members for each team
     for (const team of teams) {
-      const membersResult = await pool.query(
+      const membersResult = await this.pool.query(
         `SELECT tm.*, u.display_name, u.email
          FROM team_members tm
          JOIN users u ON tm.user_id = u.id
@@ -283,12 +298,12 @@ export class PostgresAdapter implements DatabaseService {
   }
 
   async getAllTeams(): Promise<Team[]> {
-    const result = await pool.query('SELECT * FROM teams ORDER BY name');
+    const result = await this.pool.query('SELECT * FROM teams ORDER BY name');
     return result.rows.map(rowToTeam);
   }
 
   async getTeamById(teamId: string): Promise<Team | null> {
-    const result = await pool.query('SELECT * FROM teams WHERE id = $1', [teamId]);
+    const result = await this.pool.query('SELECT * FROM teams WHERE id = $1', [teamId]);
     
     if (result.rows.length === 0) {
       return null;
@@ -297,7 +312,7 @@ export class PostgresAdapter implements DatabaseService {
     const team = rowToTeam(result.rows[0]);
     
     // Get team members
-    const membersResult = await pool.query(
+    const membersResult = await this.pool.query(
       `SELECT tm.*, u.display_name, u.email
        FROM team_members tm
        JOIN users u ON tm.user_id = u.id
@@ -340,7 +355,7 @@ export class PostgresAdapter implements DatabaseService {
     
     values.push(teamId);
     
-    const result = await pool.query(
+    const result = await this.pool.query(
       `UPDATE teams SET ${updateFields.join(', ')} WHERE id = $${paramIndex}`,
       values
     );
@@ -350,7 +365,7 @@ export class PostgresAdapter implements DatabaseService {
 
   async deleteTeam(teamId: string, userId: string): Promise<boolean> {
     // Check if user is team admin
-    const adminCheck = await pool.query(
+    const adminCheck = await this.pool.query(
       `SELECT * FROM team_members 
        WHERE team_id = $1 AND user_id = $2 AND role = 'admin'`,
       [teamId, userId]
@@ -361,10 +376,10 @@ export class PostgresAdapter implements DatabaseService {
     }
     
     // Delete team members first (foreign key constraint)
-    await pool.query('DELETE FROM team_members WHERE team_id = $1', [teamId]);
+    await this.pool.query('DELETE FROM team_members WHERE team_id = $1', [teamId]);
     
     // Delete team
-    const result = await pool.query('DELETE FROM teams WHERE id = $1', [teamId]);
+    const result = await this.pool.query('DELETE FROM teams WHERE id = $1', [teamId]);
     
     return result.rowCount > 0;
   }
@@ -372,7 +387,7 @@ export class PostgresAdapter implements DatabaseService {
   // Team member operations
   async addTeamMember(teamId: string, member: Omit<TeamMember, 'joinedAt'>): Promise<boolean> {
     try {
-      await pool.query(
+      await this.pool.query(
         `INSERT INTO team_members (team_id, user_id, role, status, joined_at)
          VALUES ($1, $2, $3, $4, $5)
          ON CONFLICT (team_id, user_id) DO UPDATE SET
@@ -389,7 +404,7 @@ export class PostgresAdapter implements DatabaseService {
   }
 
   async removeTeamMember(teamId: string, userId: string): Promise<boolean> {
-    const result = await pool.query(
+    const result = await this.pool.query(
       'DELETE FROM team_members WHERE team_id = $1 AND user_id = $2',
       [teamId, userId]
     );
@@ -419,7 +434,7 @@ export class PostgresAdapter implements DatabaseService {
     values.push(teamId);
     values.push(userId);
     
-    const result = await pool.query(
+    const result = await this.pool.query(
       `UPDATE team_members SET ${updateFields.join(', ')} 
        WHERE team_id = $${paramIndex++} AND user_id = $${paramIndex}`,
       values
@@ -429,7 +444,7 @@ export class PostgresAdapter implements DatabaseService {
   }
 
   async getTeamMembers(teamId: string): Promise<TeamMember[]> {
-    const result = await pool.query(
+    const result = await this.pool.query(
       `SELECT tm.*, u.display_name, u.email
        FROM team_members tm
        JOIN users u ON tm.user_id = u.id
@@ -449,7 +464,7 @@ export class PostgresAdapter implements DatabaseService {
 
   // User operations
   async searchUserByEmail(email: string): Promise<User | null> {
-    const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+    const result = await this.pool.query('SELECT * FROM users WHERE email = $1', [email]);
     
     if (result.rows.length === 0) {
       return null;
@@ -459,7 +474,7 @@ export class PostgresAdapter implements DatabaseService {
   }
 
   async createUserProfile(userId: string, profile: UserProfile): Promise<void> {
-    await pool.query(
+    await this.pool.query(
       `INSERT INTO users (id, email, display_name, photo_url, created_at)
        VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (id) DO UPDATE SET
@@ -496,14 +511,14 @@ export class PostgresAdapter implements DatabaseService {
     
     values.push(userId);
     
-    await pool.query(
+    await this.pool.query(
       `UPDATE users SET ${updateFields.join(', ')} WHERE id = $${paramIndex}`,
       values
     );
   }
 
   async getUserProfile(userId: string): Promise<UserProfile | null> {
-    const result = await pool.query('SELECT * FROM users WHERE id = $1', [userId]);
+    const result = await this.pool.query('SELECT * FROM users WHERE id = $1', [userId]);
     
     if (result.rows.length === 0) {
       return null;
@@ -516,7 +531,7 @@ export class PostgresAdapter implements DatabaseService {
   async assignTask(meetingId: string, taskId: string, assigneeId: string, assignedBy: string, meetingOwnerId: string): Promise<boolean> {
     try {
       // Get the meeting first
-      const meetingResult = await pool.query('SELECT * FROM meetings WHERE id = $1', [meetingId]);
+      const meetingResult = await this.pool.query('SELECT * FROM meetings WHERE id = $1', [meetingId]);
       
       if (meetingResult.rows.length === 0) {
         return false;
@@ -533,7 +548,7 @@ export class PostgresAdapter implements DatabaseService {
       }
       
       // Get assignee info
-      const assigneeResult = await pool.query('SELECT * FROM users WHERE id = $1', [assigneeId]);
+      const assigneeResult = await this.pool.query('SELECT * FROM users WHERE id = $1', [assigneeId]);
       const assigneeName = assigneeResult.rows.length > 0 ? assigneeResult.rows[0].display_name : 'Unknown User';
       
       // Update the task
@@ -546,7 +561,7 @@ export class PostgresAdapter implements DatabaseService {
       };
       
       // Update the meeting
-      await pool.query(
+      await this.pool.query(
         'UPDATE meetings SET action_items = $1, updated_at = NOW() WHERE id = $2',
         [JSON.stringify(actionItems), meetingId]
       );
@@ -579,7 +594,7 @@ export class PostgresAdapter implements DatabaseService {
   async updateTaskStatus(meetingId: string, taskId: string, status: ActionItem['status']): Promise<boolean> {
     try {
       // Get the meeting first
-      const meetingResult = await pool.query('SELECT * FROM meetings WHERE id = $1', [meetingId]);
+      const meetingResult = await this.pool.query('SELECT * FROM meetings WHERE id = $1', [meetingId]);
       
       if (meetingResult.rows.length === 0) {
         return false;
@@ -602,7 +617,7 @@ export class PostgresAdapter implements DatabaseService {
       };
       
       // Update the meeting
-      await pool.query(
+      await this.pool.query(
         'UPDATE meetings SET action_items = $1, updated_at = NOW() WHERE id = $2',
         [JSON.stringify(actionItems), meetingId]
       );
@@ -620,7 +635,7 @@ export class PostgresAdapter implements DatabaseService {
   async getTeamTasks(teamId: string): Promise<ActionItem[]> {
     try {
       // Get all meetings for the team
-      const meetingsResult = await pool.query(
+      const meetingsResult = await this.pool.query(
         'SELECT * FROM meetings WHERE team_id = $1',
         [teamId]
       );
@@ -670,7 +685,7 @@ export class PostgresAdapter implements DatabaseService {
   }): Promise<string> {
     const taskId = task.id || uuidv4();
     
-    await pool.query(
+    await this.pool.query(
       `INSERT INTO tasks (
         id, description, assignee_id, assignee_name, assigned_by, assigned_at,
         status, priority, deadline, meeting_id, meeting_title, meeting_date,
@@ -716,7 +731,7 @@ export class PostgresAdapter implements DatabaseService {
   }
 
   async getUserTasksFromCollection(userId: string): Promise<any[]> {
-    const result = await pool.query(
+    const result = await this.pool.query(
       'SELECT * FROM tasks WHERE assignee_id = $1 ORDER BY created_at DESC',
       [userId]
     );
@@ -785,7 +800,7 @@ export class PostgresAdapter implements DatabaseService {
     
     values.push(taskId);
     
-    const result = await pool.query(
+    const result = await this.pool.query(
       `UPDATE tasks SET ${updateFields.join(', ')} WHERE id = $${paramIndex}`,
       values
     );
@@ -797,7 +812,7 @@ export class PostgresAdapter implements DatabaseService {
   async createNotification(notification: CreateNotificationData): Promise<string> {
     const notificationId = uuidv4();
     
-    await pool.query(
+    await this.pool.query(
       `INSERT INTO notifications (
         id, user_id, type, title, message, data, read, created_at
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
@@ -817,7 +832,7 @@ export class PostgresAdapter implements DatabaseService {
   }
 
   async getUserNotifications(userId: string): Promise<Notification[]> {
-    const result = await pool.query(
+    const result = await this.pool.query(
       'SELECT * FROM notifications WHERE user_id = $1 ORDER BY created_at DESC',
       [userId]
     );
@@ -835,7 +850,7 @@ export class PostgresAdapter implements DatabaseService {
   }
 
   async markNotificationAsRead(notificationId: string): Promise<boolean> {
-    const result = await pool.query(
+    const result = await this.pool.query(
       'UPDATE notifications SET read = true WHERE id = $1',
       [notificationId]
     );
@@ -844,7 +859,7 @@ export class PostgresAdapter implements DatabaseService {
   }
 
   async deleteNotification(notificationId: string): Promise<boolean> {
-    const result = await pool.query(
+    const result = await this.pool.query(
       'DELETE FROM notifications WHERE id = $1',
       [notificationId]
     );
@@ -1043,5 +1058,4 @@ export class PostgresAdapter implements DatabaseService {
   }
 }
 
-// Export a singleton instance
-export const postgresAdapter = new PostgresAdapter();
+// We'll create the instance in database.ts

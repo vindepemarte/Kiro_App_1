@@ -1,4 +1,4 @@
-// Firestore database service for meeting operations
+// Database service - can use either Firebase or PostgreSQL
 
 import {
   collection,
@@ -40,6 +40,16 @@ import {
 } from './types';
 import { ErrorHandler, AppError, retryOperation } from './error-handler';
 import { dataValidator } from './data-validator';
+import { Pool } from 'pg';
+
+// Check if we should use PostgreSQL
+const USE_POSTGRES = process.env.USE_POSTGRES === 'true';
+console.log(`Database mode: ${USE_POSTGRES ? 'PostgreSQL' : 'Firebase'}`);
+
+// Create PostgreSQL connection if needed
+const pgPool = USE_POSTGRES ? new Pool({
+  connectionString: process.env.DATABASE_URL,
+}) : null;
 
 // Database utility functions
 class DatabaseUtils {
@@ -1817,16 +1827,40 @@ class FirestoreService implements DatabaseService {
 }
 
 // Create and export singleton instance with lazy initialization
-let databaseServiceInstance: FirestoreService | null = null;
+// Import PostgreSQL adapter
+import { PostgresAdapter } from './postgres-adapter';
 
-function getDatabaseService(): FirestoreService {
-  if (!databaseServiceInstance) {
-    databaseServiceInstance = new FirestoreService();
+// Create instances of both services
+let firestoreServiceInstance: FirestoreService | null = null;
+let postgresAdapterInstance: PostgresAdapter | null = null;
+
+function getFirestoreService(): FirestoreService {
+  if (!firestoreServiceInstance) {
+    firestoreServiceInstance = new FirestoreService();
   }
-  return databaseServiceInstance;
+  return firestoreServiceInstance;
 }
 
-export const databaseService = new Proxy({} as FirestoreService, {
+function getPostgresAdapter(): PostgresAdapter {
+  if (!postgresAdapterInstance) {
+    postgresAdapterInstance = new PostgresAdapter();
+  }
+  return postgresAdapterInstance;
+}
+
+// Get the appropriate database service based on environment variable
+function getDatabaseService(): DatabaseService {
+  if (USE_POSTGRES) {
+    console.log('Using PostgreSQL database');
+    return getPostgresAdapter();
+  } else {
+    console.log('Using Firebase database');
+    return getFirestoreService();
+  }
+}
+
+// Export the database service with proper method binding
+export const databaseService = new Proxy({} as DatabaseService, {
   get(target, prop) {
     const instance = getDatabaseService();
     const value = (instance as any)[prop];
