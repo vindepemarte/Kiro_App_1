@@ -1868,12 +1868,13 @@ function getDatabaseService(): DatabaseService {
 // Export the database service with proper method binding
 export const databaseService = new Proxy({} as DatabaseService, {
   get(target, prop) {
-    // For server-side, use runtime detection
+    // For server-side, use runtime detection with PostgreSQL priority
     if (typeof window === 'undefined') {
       // Return a promise-based proxy for server-side usage
       return async (...args: any[]) => {
         const { getRuntimeDatabaseService } = await import('./database-factory');
         const instance = await getRuntimeDatabaseService();
+        console.log(`Using database service: ${instance.constructor.name} for method: ${String(prop)}`);
         const value = (instance as any)[prop];
         if (typeof value === 'function') {
           return value.apply(instance, args);
@@ -1881,7 +1882,7 @@ export const databaseService = new Proxy({} as DatabaseService, {
         return value;
       };
     } else {
-      // For client-side, use the synchronous version (Firebase)
+      // For client-side, use the synchronous version
       const instance = getDatabaseServiceInstance();
       const value = (instance as any)[prop];
       if (typeof value === 'function') {

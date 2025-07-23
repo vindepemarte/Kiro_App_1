@@ -52,7 +52,16 @@ export function getDatabaseService(): DatabaseService {
     const USE_POSTGRES = process.env.USE_POSTGRES === 'true' || process.env.USE_POSTGRES === 'true';
     
     if (USE_POSTGRES) {
-      console.log('PostgreSQL is enabled, but using synchronous factory. For PostgreSQL support, use getDatabaseServiceAsync instead.');
+      console.log('PostgreSQL is enabled, but using synchronous factory. For PostgreSQL support, use getRuntimeDatabaseService instead.');
+      
+      // Try to load PostgreSQL adapter synchronously (this will only work in certain environments)
+      try {
+        // This is a synchronous require, which may not work in all environments
+        const PostgresAdapter = require('./postgres-adapter').PostgresAdapter;
+        return new PostgresAdapter();
+      } catch (error) {
+        console.error('Failed to load PostgreSQL adapter synchronously, falling back to Firebase:', error);
+      }
     }
   }
   
@@ -85,16 +94,21 @@ export async function getRuntimeDatabaseService(): Promise<DatabaseService> {
     isServer: typeof window === 'undefined'
   });
   
-  if (USE_POSTGRES && typeof window === 'undefined' && DATABASE_URL) {
-    try {
-      console.log('Attempting to use PostgreSQL adapter');
-      // Dynamic import of PostgreSQL adapter (server-side only)
-      const { PostgresAdapter } = await import('./postgres-adapter');
-      cachedDatabaseService = new PostgresAdapter();
-      console.log('RUNTIME DATABASE MODE: PostgreSQL');
-      return cachedDatabaseService;
-    } catch (error) {
-      console.error('Failed to initialize PostgreSQL adapter, falling back to Firebase:', error);
+  // Always try to use PostgreSQL on the server if configured
+  if (typeof window === 'undefined') {
+    if (USE_POSTGRES && DATABASE_URL) {
+      try {
+        console.log('Attempting to use PostgreSQL adapter');
+        // Dynamic import of PostgreSQL adapter (server-side only)
+        const { PostgresAdapter } = await import('./postgres-adapter');
+        cachedDatabaseService = new PostgresAdapter();
+        console.log('RUNTIME DATABASE MODE: PostgreSQL');
+        return cachedDatabaseService;
+      } catch (error) {
+        console.error('Failed to initialize PostgreSQL adapter, falling back to Firebase:', error);
+      }
+    } else {
+      console.log('PostgreSQL not configured properly. USE_POSTGRES:', USE_POSTGRES, 'DATABASE_URL:', DATABASE_URL ? 'Set' : 'Not set');
     }
   }
   
