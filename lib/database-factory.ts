@@ -1,20 +1,58 @@
-// Database factory to switch between Firebase and PostgreSQL
+// Database factory - conditionally imports PostgreSQL adapter only on server-side
+import { DatabaseService } from './types';
+import { FirestoreService } from './database';
 
-import { DatabaseService } from './database';
-import { databaseService as firebaseService } from './database';
-import { postgresAdapter } from './postgres-adapter';
+// Only import PostgreSQL on the server
+let PostgresAdapter: any = null;
+if (typeof window === 'undefined') {
+  try {
+    // Server-side only import
+    // Using dynamic import to ensure it's only loaded on the server
+    PostgresAdapter = require('./postgres-adapter').PostgresAdapter;
+  } catch (error) {
+    console.error('Failed to import PostgreSQL adapter:', error);
+  }
+}
 
-// Feature flag to control which database to use
-const USE_POSTGRES = process.env.USE_POSTGRES === 'true';
+/**
+ * Get the appropriate database service based on environment and configuration
+ */
+export function getDatabaseService(): DatabaseService {
+  const USE_POSTGRES = process.env.USE_POSTGRES === 'true';
+  
+  if (USE_POSTGRES && typeof window === 'undefined' && PostgresAdapter) {
+    // Only use PostgreSQL on the server
+    try {
+      return new PostgresAdapter();
+    } catch (error) {
+      console.error('Failed to initialize PostgreSQL adapter, falling back to Firebase:', error);
+      return new FirestoreService();
+    }
+  } else {
+    // Use Firebase for client-side or when PostgreSQL is not available
+    return new FirestoreService();
+  }
+}
 
-// Export the appropriate database service based on the feature flag
-export const databaseService: DatabaseService = USE_POSTGRES ? postgresAdapter : firebaseService;
+/**
+ * Get both database services for migration purposes
+ * This should only be used in server-side scripts
+ */
+export function getDatabaseServices() {
+  if (typeof window !== 'undefined') {
+    throw new Error('getDatabaseServices can only be used on the server');
+  }
 
-// Helper function to check if we're using PostgreSQL
-export const isUsingPostgres = (): boolean => USE_POSTGRES;
+  const firebase = new FirestoreService();
+  let postgres = null;
 
-// Helper function to get both database services (for migration)
-export const getDatabaseServices = () => ({
-  firebase: firebaseService,
-  postgres: postgresAdapter
-});
+  if (PostgresAdapter) {
+    try {
+      postgres = new PostgresAdapter();
+    } catch (error) {
+      console.error('Failed to initialize PostgreSQL adapter for migration:', error);
+    }
+  }
+
+  return { firebase, postgres };
+}

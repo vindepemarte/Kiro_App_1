@@ -86,6 +86,11 @@ export class PostgresAdapter implements DatabaseService {
   private pool: Pool;
   
   constructor() {
+    // Check if we're on the server
+    if (typeof window !== 'undefined') {
+      throw new Error('PostgreSQL adapter can only be used on the server');
+    }
+    
     console.log('Initializing PostgreSQL adapter');
     if (!process.env.DATABASE_URL) {
       console.error('DATABASE_URL environment variable not set');
@@ -97,7 +102,7 @@ export class PostgresAdapter implements DatabaseService {
     });
     
     // Test the connection
-    this.this.pool.query('SELECT NOW()')
+    this.pool.query('SELECT NOW()')
       .then(() => console.log('PostgreSQL connection successful'))
       .catch(err => console.error('PostgreSQL connection error:', err));
   }
@@ -139,7 +144,7 @@ export class PostgresAdapter implements DatabaseService {
   }
 
   async getUserMeetings(userId: string): Promise<Meeting[]> {
-    const result = await this.this.pool.query(
+    const result = await this.pool.query(
       'SELECT * FROM meetings WHERE user_id = $1 ORDER BY date DESC',
       [userId]
     );

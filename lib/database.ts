@@ -42,14 +42,20 @@ import { ErrorHandler, AppError, retryOperation } from './error-handler';
 import { dataValidator } from './data-validator';
 import { Pool } from 'pg';
 
-// Check if we should use PostgreSQL
-const USE_POSTGRES = process.env.USE_POSTGRES === 'true';
-console.log(`Database mode: ${USE_POSTGRES ? 'PostgreSQL' : 'Firebase'}`);
+// Import the database factory
+import { getDatabaseService as getFactoryDatabaseService } from './database-factory';
 
-// Create PostgreSQL connection if needed
-const pgPool = USE_POSTGRES ? new Pool({
-  connectionString: process.env.DATABASE_URL,
-}) : null;
+// Log database mode for server-side
+if (typeof window === 'undefined') {
+  const USE_POSTGRES = process.env.USE_POSTGRES === 'true';
+  console.log(`Database mode: ${USE_POSTGRES ? 'PostgreSQL' : 'Firebase'}`);
+}
+
+// Create a function to get the database service instance
+// This will be used by the proxy to get the instance on demand
+function getDatabaseServiceInstance(): DatabaseService {
+  return getFactoryDatabaseService();
+}
 
 // Database utility functions
 class DatabaseUtils {
@@ -1850,19 +1856,14 @@ function getPostgresAdapter(): PostgresAdapter {
 
 // Get the appropriate database service based on environment variable
 function getDatabaseService(): DatabaseService {
-  if (USE_POSTGRES) {
-    console.log('Using PostgreSQL database');
-    return getPostgresAdapter();
-  } else {
-    console.log('Using Firebase database');
-    return getFirestoreService();
-  }
+  // Import from the factory instead of using the global variable
+  return getDatabaseServiceInstance();
 }
 
 // Export the database service with proper method binding
 export const databaseService = new Proxy({} as DatabaseService, {
   get(target, prop) {
-    const instance = getDatabaseService();
+    const instance = getDatabaseServiceInstance();
     const value = (instance as any)[prop];
     if (typeof value === 'function') {
       return value.bind(instance);
