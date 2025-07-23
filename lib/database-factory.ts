@@ -6,13 +6,29 @@ import { FirestoreService } from './database';
  * Get the appropriate database service based on environment and configuration
  */
 export async function getDatabaseServiceAsync(): Promise<DatabaseService> {
-  // Check both variants of the environment variable name
-  const USE_POSTGRES = process.env.USE_POSTGRES === 'true' || process.env.USE_POSTGRES === 'true';
+  // Log all relevant environment variables for debugging
+  if (typeof window === 'undefined') {
+    console.log('Database factory environment check:', {
+      USE_POSTGRES: process.env.USE_POSTGRES,
+      USE_POSTGRES_UNDERSCORE: process.env.USE_POSTGRES,
+      DATABASE_URL: process.env.DATABASE_URL ? 'Set (value hidden)' : 'Not set',
+      NODE_ENV: process.env.NODE_ENV,
+    });
+  }
   
-  if (USE_POSTGRES && typeof window === 'undefined') {
+  // Check both variants of the environment variable name
+  const usePostgres = process.env.USE_POSTGRES === 'true';
+  const usePostgresUnderscore = process.env.USE_POSTGRES === 'true';
+  const USE_POSTGRES = usePostgres || usePostgresUnderscore;
+  
+  console.log(`Should use PostgreSQL? ${USE_POSTGRES ? 'Yes' : 'No'}`);
+  
+  if (USE_POSTGRES && typeof window === 'undefined' && process.env.DATABASE_URL) {
     try {
+      console.log('Attempting to use PostgreSQL adapter');
       // Dynamic import of PostgreSQL adapter (server-side only)
       const { PostgresAdapter } = await import('./postgres-adapter');
+      console.log('PostgreSQL adapter imported successfully');
       return new PostgresAdapter();
     } catch (error) {
       console.error('Failed to initialize PostgreSQL adapter, falling back to Firebase:', error);
@@ -20,6 +36,7 @@ export async function getDatabaseServiceAsync(): Promise<DatabaseService> {
     }
   } else {
     // Use Firebase for client-side or when PostgreSQL is not available
+    console.log('Using Firebase database service');
     return new FirestoreService();
   }
 }
