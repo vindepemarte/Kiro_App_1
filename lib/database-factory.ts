@@ -2,28 +2,17 @@
 import { DatabaseService } from './types';
 import { FirestoreService } from './database';
 
-// Only import PostgreSQL on the server
-let PostgresAdapter: any = null;
-if (typeof window === 'undefined') {
-  try {
-    // Server-side only import
-    // Using dynamic import to ensure it's only loaded on the server
-    PostgresAdapter = require('./postgres-adapter').PostgresAdapter;
-  } catch (error) {
-    console.error('Failed to import PostgreSQL adapter:', error);
-  }
-}
-
 /**
  * Get the appropriate database service based on environment and configuration
  */
-export function getDatabaseService(): DatabaseService {
+export async function getDatabaseServiceAsync(): Promise<DatabaseService> {
   // Check both variants of the environment variable name
   const USE_POSTGRES = process.env.USE_POSTGRES === 'true' || process.env.USE_POSTGRES === 'true';
   
-  if (USE_POSTGRES && typeof window === 'undefined' && PostgresAdapter) {
-    // Only use PostgreSQL on the server
+  if (USE_POSTGRES && typeof window === 'undefined') {
     try {
+      // Dynamic import of PostgreSQL adapter (server-side only)
+      const { PostgresAdapter } = await import('./postgres-adapter');
       return new PostgresAdapter();
     } catch (error) {
       console.error('Failed to initialize PostgreSQL adapter, falling back to Firebase:', error);
@@ -33,6 +22,25 @@ export function getDatabaseService(): DatabaseService {
     // Use Firebase for client-side or when PostgreSQL is not available
     return new FirestoreService();
   }
+}
+
+/**
+ * Synchronous version that doesn't use dynamic imports
+ * This is safer for build-time usage
+ */
+export function getDatabaseService(): DatabaseService {
+  // For safety, always return Firebase during build
+  if (process.env.NODE_ENV === 'production' && typeof window === 'undefined') {
+    // In production server environment, we can check if PostgreSQL is enabled
+    const USE_POSTGRES = process.env.USE_POSTGRES === 'true' || process.env.USE_POSTGRES === 'true';
+    
+    if (USE_POSTGRES) {
+      console.log('PostgreSQL is enabled, but using synchronous factory. For PostgreSQL support, use getDatabaseServiceAsync instead.');
+    }
+  }
+  
+  // Default to Firebase for safety
+  return new FirestoreService();
 }
 
 /**

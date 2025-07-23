@@ -40,7 +40,6 @@ import {
 } from './types';
 import { ErrorHandler, AppError, retryOperation } from './error-handler';
 import { dataValidator } from './data-validator';
-import { Pool } from 'pg';
 
 // Import the database factory
 import { getDatabaseService as getFactoryDatabaseService } from './database-factory';
@@ -1854,17 +1853,16 @@ function getFirestoreService(): FirestoreService {
   return firestoreServiceInstance;
 }
 
-function getPostgresAdapter(): PostgresAdapter {
-  if (!postgresAdapterInstance) {
-    postgresAdapterInstance = new PostgresAdapter();
-  }
-  return postgresAdapterInstance;
+// This function is no longer used directly - we use the factory instead
+function getPostgresAdapter(): any {
+  console.warn('getPostgresAdapter is deprecated, use getDatabaseService from database-factory instead');
+  return getFactoryDatabaseService();
 }
 
 // Get the appropriate database service based on environment variable
 function getDatabaseService(): DatabaseService {
   // Import from the factory instead of using the global variable
-  return getDatabaseServiceInstance();
+  return getFactoryDatabaseService();
 }
 
 // Export the database service with proper method binding

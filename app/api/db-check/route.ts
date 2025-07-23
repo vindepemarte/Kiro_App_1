@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { getDatabaseService } from '@/lib/database-factory';
 
 export async function GET() {
   // This is a server-side API route, so we can check environment variables here
@@ -10,10 +9,13 @@ export async function GET() {
   // Get the database service
   let databaseType = 'Unknown';
   try {
+    // Dynamically import to avoid build-time issues
+    const { getDatabaseService } = await import('@/lib/database-factory');
     const db = getDatabaseService();
     databaseType = db.constructor.name;
   } catch (error) {
     console.error('Error getting database service:', error);
+    databaseType = `Error: ${error instanceof Error ? error.message : String(error)}`;
   }
   
   return NextResponse.json({

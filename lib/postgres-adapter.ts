@@ -92,19 +92,41 @@ export class PostgresAdapter implements DatabaseService {
     }
     
     console.log('Initializing PostgreSQL adapter');
+    console.log('Environment variables:', {
+      USE_POSTGRES: process.env.USE_POSTGRES,
+      DATABASE_URL: process.env.DATABASE_URL ? 'Set (value hidden)' : 'Not set',
+    });
+    
     if (!process.env.DATABASE_URL) {
       console.error('DATABASE_URL environment variable not set');
       throw new Error('DATABASE_URL environment variable not set');
     }
     
-    this.pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
-    });
+    try {
+      this.pool = new Pool({
+        connectionString: process.env.DATABASE_URL,
+        // Add some connection options for better diagnostics
+        connectionTimeoutMillis: 10000, // 10 seconds
+        query_timeout: 10000, // 10 seconds
+      });
+      
+      console.log('PostgreSQL pool created successfully');
+    } catch (error) {
+      console.error('Error creating PostgreSQL pool:', error);
+      throw new Error(`Failed to create PostgreSQL pool: ${error instanceof Error ? error.message : String(error)}`);
+    }
     
     // Test the connection
     this.pool.query('SELECT NOW()')
-      .then(() => console.log('PostgreSQL connection successful'))
-      .catch(err => console.error('PostgreSQL connection error:', err));
+      .then((result) => {
+        console.log('PostgreSQL connection successful, server time:', result.rows[0].now);
+        console.log('PostgreSQL adapter initialized successfully');
+      })
+      .catch(err => {
+        console.error('PostgreSQL connection error:', err);
+        console.error('Connection string format (redacted):', 
+          process.env.DATABASE_URL?.replace(/\/\/[^:]+:[^@]+@/, '//USER:PASSWORD@'));
+      });
   }
   // Meeting operations
   async saveMeeting(userId: string, meeting: ProcessedMeeting, teamId?: string): Promise<string> {
