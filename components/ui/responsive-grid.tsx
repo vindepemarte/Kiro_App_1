@@ -86,6 +86,9 @@ export function ResponsiveContainer({
 }: ResponsiveContainerProps) {
   const containerClasses = cn(
     "mx-auto w-full",
+    // Add mobile safe area padding
+    "pb-20 md:pb-8", // Extra bottom padding for mobile navigation
+    "pt-safe", // Safe area top padding
     // Max width
     maxWidth === "sm" && "max-w-sm",
     maxWidth === "md" && "max-w-md", 

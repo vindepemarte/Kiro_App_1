@@ -114,7 +114,21 @@ export function NotificationPreferences({ isOpen, onClose }: NotificationPrefere
   return (
     <div className="fixed inset-0 z-50 bg-black/50" onClick={onClose}>
       <div 
-        className="fixed right-4 top-16 w-96 max-h-[80vh] bg-white rounded-lg shadow-lg border"
+        className={`
+          fixed bg-white shadow-lg border transition-all duration-300 ease-out
+          /* Mobile: full screen modal with safe areas */
+          inset-x-2 inset-y-4 rounded-xl
+          /* Tablet: positioned modal */
+          sm:right-4 sm:top-16 sm:left-auto sm:bottom-auto sm:w-96 sm:max-h-[85vh] sm:rounded-lg
+          /* Desktop: positioned modal */
+          md:right-4 md:top-16 md:left-auto md:bottom-auto md:w-96 md:max-h-[80vh]
+          lg:right-4 lg:top-16 lg:left-auto lg:bottom-auto lg:w-96 lg:max-h-[80vh]
+          animate-slide-up
+        `}
+        style={{ 
+          paddingBottom: 'env(safe-area-inset-bottom)',
+          maxHeight: 'calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 2rem)'
+        }}
         onClick={(e) => e.stopPropagation()}
       >
         <Card className="h-full">

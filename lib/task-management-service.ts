@@ -262,12 +262,19 @@ export class TaskManagementServiceImpl implements TaskManagementService {
           console.warn('Failed to load tasks from collection, falling back to meeting-based approach:', error);
         }
         
-        // 2. FALLBACK: Get user's own meetings (if they uploaded any)
+        // 2. CRITICAL FIX: Get user's own meetings (personal meetings with tasks)
         try {
           const userMeetings = await this.databaseService.getUserMeetings(userId);
+          console.log(`Found ${userMeetings.length} personal meetings for user ${userId}`);
+          
           for (const meeting of userMeetings) {
             const meetingTasks = await this.extractTasksFromMeeting(meeting, meeting.teamId);
-            const userTasks = meetingTasks.filter(task => task.assigneeId === userId);
+            // For personal meetings, include ALL tasks (they should be assigned to the user)
+            // For team meetings, only include tasks assigned to this user
+            const userTasks = meetingTasks.filter(task => 
+              task.assigneeId === userId || (!meeting.teamId && !task.assigneeId)
+            );
+            console.log(`Found ${userTasks.length} tasks in meeting ${meeting.title}`);
             allTasks.push(...userTasks);
           }
         } catch (error) {

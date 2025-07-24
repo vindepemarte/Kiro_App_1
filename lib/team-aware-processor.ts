@@ -106,6 +106,54 @@ export class TeamAwareMeetingProcessor {
         throw new Error(`Failed to save meeting: ${saveError instanceof Error ? saveError.message : 'Unknown error'}`);
       }
 
+      // Step 7.5: CRITICAL FIX - Create tasks for personal meetings
+      // For personal meetings (no teamId), assign all action items to the meeting owner
+      if (!options.teamId && meeting.actionItems.length > 0) {
+        try {
+          const userProfile = await databaseService.getUserProfile(options.userId);
+          const userName = userProfile?.displayName || `User ${options.userId.slice(0, 8)}`;
+          
+          for (const actionItem of meeting.actionItems) {
+            // Auto-assign to meeting owner if not already assigned
+            if (!actionItem.assigneeId) {
+              actionItem.assigneeId = options.userId;
+              actionItem.assigneeName = userName;
+              actionItem.assignedBy = options.userId;
+              actionItem.assignedAt = new Date();
+            }
+            
+            // Create task document in dedicated tasks collection
+            await databaseService.createTask({
+              id: actionItem.id,
+              description: actionItem.description,
+              assigneeId: actionItem.assigneeId,
+              assigneeName: actionItem.assigneeName,
+              assignedBy: actionItem.assignedBy,
+              assignedAt: actionItem.assignedAt,
+              status: actionItem.status,
+              priority: actionItem.priority,
+              deadline: actionItem.deadline,
+              meetingId: meeting.id,
+              meetingTitle: meeting.title,
+              meetingDate: meeting.date,
+              teamId: undefined, // Personal meeting
+              teamName: undefined,
+              owner: actionItem.owner
+            });
+          }
+          
+          // Update meeting with assigned action items
+          await databaseService.updateMeeting(meeting.id, options.userId, { 
+            actionItems: meeting.actionItems 
+          });
+          
+          console.log(`✅ Created ${meeting.actionItems.length} personal tasks for meeting ${meeting.id}`);
+        } catch (taskCreationError) {
+          console.error('Failed to create personal meeting tasks:', taskCreationError);
+          // Don't fail the entire process if task creation fails
+        }
+      }
+
       // Step 8: Send notifications for assigned tasks
       await this.sendTaskAssignmentNotifications(
         assignedTasks,
