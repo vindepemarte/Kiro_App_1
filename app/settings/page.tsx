@@ -80,11 +80,11 @@ export default function SettingsPage() {
             displayName: profile.displayName,
             email: profile.email,
             notifications: {
-              taskAssignments: profile.preferences.notifications.taskAssignments,
-              teamInvitations: profile.preferences.notifications.teamInvitations,
-              meetingAssignments: profile.preferences.notifications.meetingAssignments,
+              taskAssignments: profile.preferences?.notifications?.taskAssignments ?? true,
+              teamInvitations: profile.preferences?.notifications?.teamInvitations ?? true,
+              meetingAssignments: profile.preferences?.notifications?.meetingAssignments ?? true,
             },
-            theme: profile.preferences.theme
+            theme: profile.preferences?.theme ?? 'system'
           })
         } else {
           // Fallback to user auth data
@@ -185,11 +185,11 @@ export default function SettingsPage() {
           displayName: updatedProfile.displayName,
           email: updatedProfile.email,
           notifications: {
-            taskAssignments: updatedProfile.preferences.notifications.taskAssignments,
-            teamInvitations: updatedProfile.preferences.notifications.teamInvitations,
-            meetingAssignments: updatedProfile.preferences.notifications.meetingAssignments,
+            taskAssignments: updatedProfile.preferences?.notifications?.taskAssignments ?? true,
+            teamInvitations: updatedProfile.preferences?.notifications?.teamInvitations ?? true,
+            meetingAssignments: updatedProfile.preferences?.notifications?.meetingAssignments ?? true,
           },
-          theme: updatedProfile.preferences.theme
+          theme: updatedProfile.preferences?.theme ?? 'system'
         })
       }
       

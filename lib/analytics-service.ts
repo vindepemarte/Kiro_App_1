@@ -87,10 +87,10 @@ export class AnalyticsServiceImpl implements AnalyticsService {
         const oneMonthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
         // Meeting analytics
-        const meetingsThisWeek = meetings.filter(m => m.createdAt >= oneWeekAgo).length;
-        const meetingsThisMonth = meetings.filter(m => m.createdAt >= oneMonthAgo).length;
+        const meetingsThisWeek = meetings.filter(m => new Date(m.createdAt) >= oneWeekAgo).length;
+        const meetingsThisMonth = meetings.filter(m => new Date(m.createdAt) >= oneMonthAgo).length;
         const averageMeetingsPerWeek = meetings.length > 0 ? 
-          meetings.length / Math.max(1, Math.ceil((now.getTime() - meetings[meetings.length - 1]?.createdAt.getTime()) / (7 * 24 * 60 * 60 * 1000))) : 0;
+          meetings.length / Math.max(1, Math.ceil((now.getTime() - new Date(meetings[meetings.length - 1]?.createdAt).getTime()) / (7 * 24 * 60 * 60 * 1000))) : 0;
 
         // Task analytics
         const completedTasks = tasks.filter(t => t.status === 'completed').length;
@@ -100,7 +100,7 @@ export class AnalyticsServiceImpl implements AnalyticsService {
         ).length;
         const completionRate = tasks.length > 0 ? (completedTasks / tasks.length) * 100 : 0;
         const averageTasksPerWeek = tasks.length > 0 ? 
-          tasks.length / Math.max(1, Math.ceil((now.getTime() - tasks[tasks.length - 1]?.createdAt.getTime()) / (7 * 24 * 60 * 60 * 1000))) : 0;
+          tasks.length / Math.max(1, Math.ceil((now.getTime() - new Date(tasks[tasks.length - 1]?.createdAt).getTime()) / (7 * 24 * 60 * 60 * 1000))) : 0;
 
         // Team analytics
         const activeTeams = teams.filter(t => t.members.some(m => m.userId === userId && m.status === 'active')).length;
@@ -192,8 +192,8 @@ export class AnalyticsServiceImpl implements AnalyticsService {
         const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
         const oneMonthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
-        const meetingsThisWeek = meetings.filter(m => m.createdAt >= oneWeekAgo).length;
-        const meetingsThisMonth = meetings.filter(m => m.createdAt >= oneMonthAgo).length;
+        const meetingsThisWeek = meetings.filter(m => new Date(m.createdAt) >= oneWeekAgo).length;
+        const meetingsThisMonth = meetings.filter(m => new Date(m.createdAt) >= oneMonthAgo).length;
         const completedTasks = tasks.filter(t => t.status === 'completed').length;
         const pendingTasks = tasks.filter(t => t.status === 'pending' || t.status === 'in_progress').length;
         const overdueTasks = tasks.filter(t => 
@@ -316,7 +316,7 @@ export class AnalyticsServiceImpl implements AnalyticsService {
     const monthCounts = new Map<string, number>();
     
     meetings.forEach(meeting => {
-      const month = meeting.createdAt.toISOString().slice(0, 7); // YYYY-MM format
+      const month = new Date(meeting.createdAt).toISOString().slice(0, 7); // YYYY-MM format
       monthCounts.set(month, (monthCounts.get(month) || 0) + 1);
     });
 
@@ -351,7 +351,7 @@ export class AnalyticsServiceImpl implements AnalyticsService {
     const weeklyData = new Map<string, { completed: number; created: number }>();
     
     tasks.forEach(task => {
-      const createdWeek = this.getWeekString(task.createdAt);
+      const createdWeek = this.getWeekString(new Date(task.createdAt));
       const current = weeklyData.get(createdWeek) || { completed: 0, created: 0 };
       current.created += 1;
       
@@ -371,7 +371,7 @@ export class AnalyticsServiceImpl implements AnalyticsService {
     const dayCounts = new Map<string, number>();
     
     meetings.forEach(meeting => {
-      const day = meeting.date.toLocaleDateString('en-US', { weekday: 'long' });
+      const day = new Date(meeting.date).toLocaleDateString('en-US', { weekday: 'long' });
       dayCounts.set(day, (dayCounts.get(day) || 0) + 1);
     });
 
