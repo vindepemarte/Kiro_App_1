@@ -432,9 +432,7 @@ export default function Dashboard() {
     )
   }
 
-  // Redirect to home if not authenticated
   if (!user) {
-    router.push('/')
     return null
   }
 

@@ -23,7 +23,13 @@ export class UserProfileConsistencyServiceImpl implements UserProfileConsistency
         }
 
         // Check if profile already exists
-        const existingProfile = await this.databaseService.getUserProfile(user.uid);
+        let existingProfile;
+        try {
+          existingProfile = await this.databaseService.getUserProfile(user.uid);
+        } catch (error) {
+          console.log('Profile not found, will create new one:', error);
+          existingProfile = null;
+        }
         
         if (!existingProfile) {
           // Create new profile
@@ -44,8 +50,13 @@ export class UserProfileConsistencyServiceImpl implements UserProfileConsistency
             updatedAt: new Date()
           };
 
-          await this.databaseService.createUserProfile(user.uid, newProfile);
-          console.log(`Created user profile for ${user.email}`);
+          try {
+            await this.databaseService.createUserProfile(user.uid, newProfile);
+            console.log(`Created user profile for ${user.email}`);
+          } catch (error) {
+            console.error('Failed to create user profile:', error);
+            throw error;
+          }
         } else {
           // Update existing profile if needed
           const updates: Partial<UserProfile> = {};

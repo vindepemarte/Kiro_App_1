@@ -1,6 +1,6 @@
 // Database factory - conditionally imports PostgreSQL adapter only on server-side
-import { DatabaseService } from './types';
-import { FirestoreService } from './database';
+import { DatabaseService, FirestoreService } from './database';
+import { ClientDatabaseAdapter } from './client-database-adapter';
 
 /**
  * Get the appropriate database service based on environment and configuration
@@ -46,11 +46,17 @@ export async function getDatabaseServiceAsync(): Promise<DatabaseService> {
  * This is safer for build-time usage
  */
 export function getDatabaseService(): DatabaseService {
-  // For safety, always return Firebase during build
+  const USE_POSTGRES = process.env.USE_POSTGRES === 'true' || process.env.USE_POSTGRES === 'true';
+  
+  // Client-side: For synchronous calls, we can't check the API, so we default to Firebase
+  // The async version should be used for proper PostgreSQL detection
+  if (typeof window !== 'undefined') {
+    console.log('CLIENT DATABASE MODE: Firebase (synchronous fallback)');
+    return new FirestoreService();
+  }
+  
+  // Server-side: For safety, always return Firebase during build unless explicitly configured
   if (process.env.NODE_ENV === 'production' && typeof window === 'undefined') {
-    // In production server environment, we can check if PostgreSQL is enabled
-    const USE_POSTGRES = process.env.USE_POSTGRES === 'true' || process.env.USE_POSTGRES === 'true';
-    
     if (USE_POSTGRES) {
       console.log('PostgreSQL is enabled, but using synchronous factory. For PostgreSQL support, use getRuntimeDatabaseService instead.');
       
@@ -94,26 +100,38 @@ export async function getRuntimeDatabaseService(): Promise<DatabaseService> {
     isServer: typeof window === 'undefined'
   });
   
-  // Always try to use PostgreSQL on the server if configured
-  if (typeof window === 'undefined') {
-    if (USE_POSTGRES && DATABASE_URL) {
-      try {
-        console.log('Attempting to use PostgreSQL adapter');
-        // Dynamic import of PostgreSQL adapter (server-side only)
-        const { PostgresAdapter } = await import('./postgres-adapter');
-        cachedDatabaseService = new PostgresAdapter();
-        console.log('RUNTIME DATABASE MODE: PostgreSQL');
-        return cachedDatabaseService;
-      } catch (error) {
-        console.error('Failed to initialize PostgreSQL adapter, falling back to Firebase:', error);
-      }
+  // Client-side: Check database mode via API
+  if (typeof window !== 'undefined') {
+    const shouldUsePostgres = await ClientDatabaseAdapter.shouldUse();
+    if (shouldUsePostgres) {
+      console.log('CLIENT DATABASE MODE: API Adapter (PostgreSQL backend)');
+      cachedDatabaseService = new ClientDatabaseAdapter();
+      return cachedDatabaseService;
     } else {
-      console.log('PostgreSQL not configured properly. USE_POSTGRES:', USE_POSTGRES, 'DATABASE_URL:', DATABASE_URL ? 'Set' : 'Not set');
+      console.log('CLIENT DATABASE MODE: Firebase');
+      cachedDatabaseService = new FirestoreService();
+      return cachedDatabaseService;
     }
   }
   
+  // Server-side: Try to use PostgreSQL if configured
+  if (USE_POSTGRES && DATABASE_URL) {
+    try {
+      console.log('Attempting to use PostgreSQL adapter');
+      // Dynamic import of PostgreSQL adapter (server-side only)
+      const { PostgresAdapter } = await import('./postgres-adapter');
+      cachedDatabaseService = new PostgresAdapter();
+      console.log('SERVER DATABASE MODE: PostgreSQL');
+      return cachedDatabaseService;
+    } catch (error) {
+      console.error('Failed to initialize PostgreSQL adapter, falling back to Firebase:', error);
+    }
+  } else {
+    console.log('PostgreSQL not configured properly. USE_POSTGRES:', USE_POSTGRES, 'DATABASE_URL:', DATABASE_URL ? 'Set' : 'Not set');
+  }
+  
   // Use Firebase as fallback
-  console.log('RUNTIME DATABASE MODE: Firebase');
+  console.log('SERVER DATABASE MODE: Firebase');
   cachedDatabaseService = new FirestoreService();
   return cachedDatabaseService;
 }

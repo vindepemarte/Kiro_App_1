@@ -167,7 +167,7 @@ export const notificationService = {
       if (!teamInvitation.data.teamId) {
         throw new Error('Team ID not found in invitation data');
       }
-      await teamService.acceptTeamInvitation(teamInvitation.data.teamId, userId);
+      await teamService.acceptTeamInvitation(notificationId, userId);
       
       // Mark the notification as read
       await databaseService.markNotificationAsRead(notificationId);

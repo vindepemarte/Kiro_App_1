@@ -135,9 +135,16 @@ export function NotificationCenter({ isOpen, onClose }: NotificationCenterProps)
   };
 
   // Format notification time
-  const formatNotificationTime = (date: Date) => {
+  const formatNotificationTime = (date: Date | string) => {
     const now = new Date();
-    const diffInMinutes = Math.floor((now.getTime() - date.getTime()) / (1000 * 60));
+    const dateObj = typeof date === 'string' ? new Date(date) : date;
+    
+    // Check if date is valid
+    if (!dateObj || isNaN(dateObj.getTime())) {
+      return 'Unknown time';
+    }
+    
+    const diffInMinutes = Math.floor((now.getTime() - dateObj.getTime()) / (1000 * 60));
     
     if (diffInMinutes < 1) return 'Just now';
     if (diffInMinutes < 60) return `${diffInMinutes}m ago`;

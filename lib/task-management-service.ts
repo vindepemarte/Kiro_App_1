@@ -320,7 +320,11 @@ export class TaskManagementServiceImpl implements TaskManagementService {
         );
 
         // Sort tasks by creation date (newest first)
-        return uniqueTasks.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+        return uniqueTasks.sort((a, b) => {
+          const dateA = a.createdAt instanceof Date ? a.createdAt : new Date(a.createdAt);
+          const dateB = b.createdAt instanceof Date ? b.createdAt : new Date(b.createdAt);
+          return dateB.getTime() - dateA.getTime();
+        });
 
       } catch (error) {
         throw ErrorHandler.handleError(error, 'Get User Tasks');
@@ -378,7 +382,11 @@ export class TaskManagementServiceImpl implements TaskManagementService {
         }
 
         // Sort tasks by creation date (newest first)
-        return allTasks.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+        return allTasks.sort((a, b) => {
+          const dateA = a.createdAt instanceof Date ? a.createdAt : new Date(a.createdAt);
+          const dateB = b.createdAt instanceof Date ? b.createdAt : new Date(b.createdAt);
+          return dateB.getTime() - dateA.getTime();
+        });
 
       } catch (error) {
         throw ErrorHandler.handleError(error, 'Get Team Tasks');
@@ -453,83 +461,109 @@ export class TaskManagementServiceImpl implements TaskManagementService {
   subscribeToUserTasks(userId: string, callback: (tasks: TaskWithContext[]) => void): () => void {
     try {
       const unsubscribeFunctions: (() => void)[] = [];
+      let updateTimeout: NodeJS.Timeout | null = null;
+      let isUpdating = false;
       
-      // Function to collect and update all user tasks
-      const updateUserTasks = async () => {
-        try {
-          const userTasks: TaskWithContext[] = [];
-          
-          // Get user teams
-          const userTeams = await this.databaseService.getUserTeams(userId);
-          
-          // Get user meetings
-          const userMeetings = await this.databaseService.getUserMeetings(userId);
-          
-          // Extract tasks from user meetings
-          for (const meeting of userMeetings) {
-            const meetingTasks = await this.extractTasksFromMeeting(meeting, meeting.teamId);
-            const assignedTasks = meetingTasks.filter(task => task.assigneeId === userId);
-            userTasks.push(...assignedTasks);
+      // Debounced function to collect and update all user tasks
+      const debouncedUpdateUserTasks = () => {
+        if (updateTimeout) {
+          clearTimeout(updateTimeout);
+        }
+        
+        updateTimeout = setTimeout(async () => {
+          if (isUpdating) {
+            return; // Skip if already updating
           }
-
-          // Get team meetings and extract tasks
-          for (const team of userTeams) {
-            try {
-              const teamMeetings = await this.databaseService.getTeamMeetings(team.id);
-              for (const meeting of teamMeetings) {
-                const meetingTasks = await this.extractTasksFromMeeting(meeting, team.id);
+          
+          isUpdating = true;
+          
+          try {
+            const userTasks: TaskWithContext[] = [];
+            const processedMeetingIds = new Set<string>();
+            
+            // Get user teams first
+            const userTeams = await this.databaseService.getUserTeams(userId);
+            
+            // Get user meetings
+            const userMeetings = await this.databaseService.getUserMeetings(userId);
+            
+            // Extract tasks from user meetings
+            for (const meeting of userMeetings) {
+              if (processedMeetingIds.has(meeting.id)) continue;
+              processedMeetingIds.add(meeting.id);
+              
+              try {
+                const meetingTasks = await this.extractTasksFromMeeting(meeting, meeting.teamId);
                 const assignedTasks = meetingTasks.filter(task => task.assigneeId === userId);
                 userTasks.push(...assignedTasks);
+              } catch (error) {
+                console.warn(`Failed to extract tasks from meeting ${meeting.id}:`, error);
               }
-            } catch (error) {
-              console.warn(`Failed to load team meetings for task subscription:`, error);
             }
-          }
 
-          // Deduplicate and sort tasks
-          const uniqueTasks = userTasks.filter((task, index, self) => 
-            index === self.findIndex(t => t.id === task.id && t.meetingId === task.meetingId)
-          );
-          
-          const sortedTasks = uniqueTasks.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
-          
-          callback(sortedTasks);
-        } catch (error) {
-          console.error('Error updating user tasks:', error);
-          callback([]);
-        }
+            // Get team meetings and extract tasks (avoid duplicates)
+            for (const team of userTeams) {
+              try {
+                const teamMeetings = await this.databaseService.getTeamMeetings(team.id);
+                for (const meeting of teamMeetings) {
+                  if (processedMeetingIds.has(meeting.id)) continue;
+                  processedMeetingIds.add(meeting.id);
+                  
+                  try {
+                    const meetingTasks = await this.extractTasksFromMeeting(meeting, team.id);
+                    const assignedTasks = meetingTasks.filter(task => task.assigneeId === userId);
+                    userTasks.push(...assignedTasks);
+                  } catch (error) {
+                    console.warn(`Failed to extract tasks from team meeting ${meeting.id}:`, error);
+                  }
+                }
+              } catch (error) {
+                console.warn(`Failed to load team meetings for team ${team.id}:`, error);
+              }
+            }
+
+            // Deduplicate and sort tasks
+            const uniqueTasks = userTasks.filter((task, index, self) => 
+              index === self.findIndex(t => t.id === task.id && t.meetingId === task.meetingId)
+            );
+            
+            const sortedTasks = uniqueTasks.sort((a, b) => {
+              const dateA = a.createdAt instanceof Date ? a.createdAt : new Date(a.createdAt);
+              const dateB = b.createdAt instanceof Date ? b.createdAt : new Date(b.createdAt);
+              return dateB.getTime() - dateA.getTime();
+            });
+            
+            callback(sortedTasks);
+          } catch (error) {
+            console.error('Error updating user tasks:', error);
+            callback([]);
+          } finally {
+            isUpdating = false;
+          }
+        }, 500); // 500ms debounce to prevent rapid updates
       };
 
       // Subscribe to user meetings changes
       const unsubscribeUserMeetings = this.databaseService.subscribeToUserMeetings(userId, () => {
-        updateUserTasks();
+        debouncedUpdateUserTasks();
       });
       unsubscribeFunctions.push(unsubscribeUserMeetings);
 
-      // Subscribe to user teams changes
-      const unsubscribeUserTeams = this.databaseService.subscribeToUserTeams(userId, async (teams) => {
-        // Subscribe to each team's meetings
-        for (const team of teams) {
-          try {
-            const unsubscribeTeamMeetings = this.databaseService.subscribeToTeamMeetings(team.id, () => {
-              updateUserTasks();
-            });
-            unsubscribeFunctions.push(unsubscribeTeamMeetings);
-          } catch (error) {
-            console.warn(`Failed to subscribe to team ${team.id} meetings:`, error);
-          }
-        }
-        
-        // Update tasks when teams change
-        updateUserTasks();
+      // Subscribe to user teams changes (but don't create nested subscriptions)
+      const unsubscribeUserTeams = this.databaseService.subscribeToUserTeams(userId, () => {
+        debouncedUpdateUserTasks();
       });
       unsubscribeFunctions.push(unsubscribeUserTeams);
 
       // Initial load
-      updateUserTasks();
+      debouncedUpdateUserTasks();
 
       // Return cleanup function
       return () => {
+        if (updateTimeout) {
+          clearTimeout(updateTimeout);
+        }
+        
         unsubscribeFunctions.forEach(unsubscribe => {
           try {
             unsubscribe();
@@ -559,7 +593,11 @@ export class TaskManagementServiceImpl implements TaskManagementService {
           }
 
           // Sort tasks by creation date
-          const sortedTasks = teamTasks.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+          const sortedTasks = teamTasks.sort((a, b) => {
+            const dateA = a.createdAt instanceof Date ? a.createdAt : new Date(a.createdAt);
+            const dateB = b.createdAt instanceof Date ? b.createdAt : new Date(b.createdAt);
+            return dateB.getTime() - dateA.getTime();
+          });
           
           callback(sortedTasks);
         } catch (error) {

@@ -39,7 +39,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
             // If user signed in, ensure their profile exists
             if (user && !user.isAnonymous) {
               try {
-                await userProfileConsistencyService.ensureUserProfile(user);
+                // Use the dedicated API endpoint for profile creation
+                const response = await fetch('/api/auth/create-profile', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({ user }),
+                });
+                
+                if (!response.ok) {
+                  console.warn('Failed to create user profile via API');
+                }
               } catch (error) {
                 console.warn('Failed to ensure user profile:', error);
                 // Don't fail auth if profile creation fails

@@ -605,7 +605,7 @@ export function TeamManagement({ className }: TeamManagementProps) {
                 <div>
                   <Label>Created</Label>
                   <p className="text-sm text-gray-600 mt-1">
-                    {selectedTeam.createdAt.toLocaleDateString()}
+                    {new Date(selectedTeam.createdAt).toLocaleDateString()}
                   </p>
                 </div>
                 

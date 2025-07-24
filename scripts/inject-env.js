@@ -6,6 +6,32 @@
 const fs = require('fs');
 const path = require('path');
 
+// Load environment variables from .env.local
+function loadEnvFile() {
+  const envPath = path.join(__dirname, '..', '.env.local');
+  if (fs.existsSync(envPath)) {
+    const envContent = fs.readFileSync(envPath, 'utf8');
+    const lines = envContent.split('\n');
+    
+    for (const line of lines) {
+      const trimmedLine = line.trim();
+      if (trimmedLine && !trimmedLine.startsWith('#') && trimmedLine.includes('=')) {
+        const [key, ...valueParts] = trimmedLine.split('=');
+        const value = valueParts.join('=');
+        if (key && value && !process.env[key]) {
+          process.env[key] = value;
+        }
+      }
+    }
+    console.log('📁 Loaded environment variables from .env.local');
+  } else {
+    console.log('⚠️  No .env.local file found, using process.env only');
+  }
+}
+
+// Load environment variables first
+loadEnvFile();
+
 // Helper function to get environment variable with multiple possible names
 function getEnvVar(primaryKey, fallbackKey, defaultValue = '') {
   return process.env[primaryKey] || process.env[fallbackKey] || defaultValue;

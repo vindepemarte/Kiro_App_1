@@ -98,8 +98,13 @@ export class TeamAwareMeetingProcessor {
         }
       };
 
-      const meetingId = await databaseService.saveMeeting(options.userId, processedMeeting, options.teamId);
-      meeting.id = meetingId;
+      try {
+        const meetingId = await databaseService.saveMeeting(options.userId, processedMeeting, options.teamId);
+        meeting.id = meetingId;
+      } catch (saveError) {
+        console.error('Failed to save meeting:', saveError);
+        throw new Error(`Failed to save meeting: ${saveError instanceof Error ? saveError.message : 'Unknown error'}`);
+      }
 
       // Step 8: Send notifications for assigned tasks
       await this.sendTaskAssignmentNotifications(
@@ -304,11 +309,12 @@ export class TeamAwareMeetingProcessor {
     meeting: Meeting,
     assignedBy: string
   ): Promise<void> {
-    for (const task of assignedTasks) {
-      if (task.assigneeId && task.assigneeId !== assignedBy) {
+    const notificationPromises = assignedTasks
+      .filter(task => task.assigneeId && task.assigneeId !== assignedBy)
+      .map(async (task) => {
         try {
           const notification: CreateNotificationData = {
-            userId: task.assigneeId,
+            userId: task.assigneeId!,
             type: 'task_assignment',
             title: 'New Task Assigned',
             message: `You have been assigned a task from "${meeting.title}"`,
@@ -323,12 +329,18 @@ export class TeamAwareMeetingProcessor {
           };
 
           await databaseService.createNotification(notification);
+          console.log(`Task assignment notification sent for task ${task.id} to user ${task.assigneeId}`);
         } catch (error) {
           console.error(`Failed to send notification for task ${task.id}:`, error);
           // Don't fail the entire process for notification errors
         }
-      }
-    }
+      });
+
+    // Send all notifications in parallel but don't wait for them to complete
+    // This prevents blocking the main process if notifications fail
+    Promise.allSettled(notificationPromises).catch(error => {
+      console.error('Error in task assignment notifications:', error);
+    });
   }
 
   /**

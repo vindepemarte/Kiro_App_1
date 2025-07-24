@@ -21,15 +21,29 @@ type Unsubscribe = () => void;
 
 // Helper to convert database rows to application objects
 const rowToMeeting = (row: any): Meeting => {
+  // Helper function to safely parse JSON fields
+  const safeJsonParse = (field: any, fallback: any = []) => {
+    if (!field) return fallback;
+    if (typeof field === 'string') {
+      try {
+        return JSON.parse(field);
+      } catch (e) {
+        console.warn('Failed to parse JSON field:', field, e);
+        return fallback;
+      }
+    }
+    return field; // Already parsed
+  };
+
   return {
     id: row.id,
     title: row.title,
     date: new Date(row.date),
     summary: row.summary,
-    transcript: row.transcript,
+    transcript: row.transcript || row.raw_transcript, // Use transcript if available, fallback to raw_transcript
     rawTranscript: row.raw_transcript,
-    actionItems: JSON.parse(row.action_items || '[]'),
-    keyPoints: JSON.parse(row.key_points || '[]'),
+    actionItems: safeJsonParse(row.action_items, []),
+    keyPoints: safeJsonParse(row.key_points, []),
     teamId: row.team_id,
     createdBy: row.user_id,
     createdAt: new Date(row.created_at),
@@ -91,11 +105,9 @@ export class PostgresAdapter implements DatabaseService {
       throw new Error('PostgreSQL adapter can only be used on the server');
     }
     
-    console.log('Initializing PostgreSQL adapter');
-    console.log('Environment variables:', {
-      USE_POSTGRES: process.env.USE_POSTGRES,
-      DATABASE_URL: process.env.DATABASE_URL ? 'Set (value hidden)' : 'Not set',
-    });
+    if (process.env.NODE_ENV === 'development') {
+      console.log('Initializing PostgreSQL adapter');
+    }
     
     if (!process.env.DATABASE_URL) {
       console.error('DATABASE_URL environment variable not set');
@@ -110,7 +122,9 @@ export class PostgresAdapter implements DatabaseService {
         query_timeout: 10000, // 10 seconds
       });
       
-      console.log('PostgreSQL pool created successfully');
+      if (process.env.NODE_ENV === 'development') {
+        console.log('PostgreSQL pool created successfully');
+      }
     } catch (error) {
       console.error('Error creating PostgreSQL pool:', error);
       throw new Error(`Failed to create PostgreSQL pool: ${error instanceof Error ? error.message : String(error)}`);
@@ -119,8 +133,10 @@ export class PostgresAdapter implements DatabaseService {
     // Test the connection
     this.pool.query('SELECT NOW()')
       .then((result) => {
-        console.log('PostgreSQL connection successful, server time:', result.rows[0].now);
-        console.log('PostgreSQL adapter initialized successfully');
+        if (process.env.NODE_ENV === 'development') {
+          console.log('PostgreSQL connection successful, server time:', result.rows[0].now);
+          console.log('PostgreSQL adapter initialized successfully');
+        }
       })
       .catch(err => {
         console.error('PostgreSQL connection error:', err);
@@ -130,7 +146,11 @@ export class PostgresAdapter implements DatabaseService {
   }
   // Meeting operations
   async saveMeeting(userId: string, meeting: ProcessedMeeting, teamId?: string): Promise<string> {
-    const meetingId = meeting.id || uuidv4();
+    const meetingId = uuidv4();
+    
+    // Extract title from metadata or use default
+    const title = meeting.metadata?.fileName?.replace(/\.[^/.]+$/, "") || 'Meeting Transcript';
+    const meetingDate = meeting.metadata?.uploadedAt || new Date();
     
     await this.pool.query(
       `INSERT INTO meetings (
@@ -149,13 +169,13 @@ export class PostgresAdapter implements DatabaseService {
         updated_at = NOW()`,
       [
         meetingId,
-        meeting.title,
-        meeting.date,
+        title,
+        meetingDate,
         meeting.summary,
-        meeting.transcript,
+        meeting.rawTranscript, // Use rawTranscript for both transcript and raw_transcript
         meeting.rawTranscript,
         JSON.stringify(meeting.actionItems || []),
-        JSON.stringify(meeting.keyPoints || []),
+        JSON.stringify([]), // keyPoints - not available in ProcessedMeeting, use empty array
         teamId || null,
         userId,
         new Date()
@@ -864,16 +884,32 @@ export class PostgresAdapter implements DatabaseService {
       [userId]
     );
     
-    return result.rows.map(row => ({
-      id: row.id,
-      userId: row.user_id,
-      type: row.type,
-      title: row.title,
-      message: row.message,
-      read: row.read,
-      data: row.data,
-      createdAt: new Date(row.created_at)
-    }));
+    return result.rows.map(row => {
+      // Helper function to safely parse JSON data
+      const safeJsonParse = (field: any, fallback: any = {}) => {
+        if (!field) return fallback;
+        if (typeof field === 'string') {
+          try {
+            return JSON.parse(field);
+          } catch (e) {
+            console.warn('Failed to parse notification data:', field, e);
+            return fallback;
+          }
+        }
+        return field; // Already parsed
+      };
+
+      return {
+        id: row.id,
+        userId: row.user_id,
+        type: row.type,
+        title: row.title,
+        message: row.message,
+        read: row.read,
+        data: safeJsonParse(row.data, {}),
+        createdAt: new Date(row.created_at)
+      };
+    });
   }
 
   async markNotificationAsRead(notificationId: string): Promise<boolean> {

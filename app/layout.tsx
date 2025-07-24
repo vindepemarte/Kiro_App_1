@@ -30,11 +30,11 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <script src="/env.js"></script>
       </head>
-      <body className={inter.className}>
+      <body className={inter.className} suppressHydrationWarning>
         <ErrorBoundary showErrorDetails={process.env.NODE_ENV === 'development'}>
           <ThemeProvider
             attribute="class"

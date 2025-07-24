@@ -1,11 +1,11 @@
 // Real-time synchronization engine for managing all data subscriptions
 
-import { 
-  Meeting, 
-  Team, 
-  Notification, 
+import {
+  Meeting,
+  Team,
+  Notification,
   TaskWithContext,
-  User 
+  User
 } from './types';
 import { DatabaseService } from './database';
 import { TaskManagementService } from './task-management-service';
@@ -22,23 +22,23 @@ export interface RealTimeSyncEngine {
   // Meeting Synchronization
   subscribeMeetingUpdates(userId: string, callback: (meetings: Meeting[]) => void): () => void;
   subscribeTeamMeetings(teamId: string, callback: (meetings: Meeting[]) => void): () => void;
-  
+
   // Task Synchronization
   subscribeTaskUpdates(userId: string, callback: (tasks: TaskWithContext[]) => void): () => void;
-  
+
   // Team Synchronization
   subscribeTeamUpdates(userId: string, callback: (teams: Team[]) => void): () => void;
-  
+
   // Notification Synchronization
   subscribeNotifications(userId: string, callback: (notifications: Notification[]) => void): () => void;
-  
+
   // Batch Updates
   syncAllUserData(userId: string): Promise<UserDataSnapshot>;
-  
+
   // Connection Management
   handleConnectionStateChange(isOnline: boolean): void;
   getConnectionState(): boolean;
-  
+
   // Cleanup
   cleanup(): void;
 }
@@ -69,10 +69,21 @@ export class RealTimeSyncEngineImpl implements RealTimeSyncEngine {
     }
   }
 
+  // Helper function to safely get timestamp from date field
+  private safeGetTime(date: Date | string | undefined): number {
+    if (!date) return 0;
+    if (date instanceof Date) return date.getTime();
+    try {
+      return new Date(date).getTime();
+    } catch {
+      return 0;
+    }
+  }
+
   // Subscribe to meeting updates for a user
   subscribeMeetingUpdates(userId: string, callback: (meetings: Meeting[]) => void): () => void {
     const subscriptionKey = `meetings-${userId}`;
-    
+
     // Clean up existing subscription if any
     const existingUnsubscribe = this.subscriptions.get(subscriptionKey);
     if (existingUnsubscribe) {
@@ -83,9 +94,9 @@ export class RealTimeSyncEngineImpl implements RealTimeSyncEngine {
     const unsubscribe = this.databaseService.subscribeToUserMeetings(userId, (meetings) => {
       try {
         // Sort meetings by creation date (newest first)
-        const sortedMeetings = meetings.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+        const sortedMeetings = meetings.sort((a, b) => this.safeGetTime(b.createdAt) - this.safeGetTime(a.createdAt));
         callback(sortedMeetings);
-        
+
         // Log update for debugging
         console.log(`Meeting updates for user ${userId}: ${meetings.length} meetings`);
       } catch (error) {
@@ -107,7 +118,7 @@ export class RealTimeSyncEngineImpl implements RealTimeSyncEngine {
   // Subscribe to team meetings
   subscribeTeamMeetings(teamId: string, callback: (meetings: Meeting[]) => void): () => void {
     const subscriptionKey = `team-meetings-${teamId}`;
-    
+
     // Clean up existing subscription if any
     const existingUnsubscribe = this.subscriptions.get(subscriptionKey);
     if (existingUnsubscribe) {
@@ -118,9 +129,9 @@ export class RealTimeSyncEngineImpl implements RealTimeSyncEngine {
     const unsubscribe = this.databaseService.subscribeToTeamMeetings(teamId, (meetings) => {
       try {
         // Sort meetings by creation date (newest first)
-        const sortedMeetings = meetings.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+        const sortedMeetings = meetings.sort((a, b) => this.safeGetTime(b.createdAt) - this.safeGetTime(a.createdAt));
         callback(sortedMeetings);
-        
+
         // Log update for debugging
         console.log(`Team meeting updates for team ${teamId}: ${meetings.length} meetings`);
       } catch (error) {
@@ -142,7 +153,7 @@ export class RealTimeSyncEngineImpl implements RealTimeSyncEngine {
   // Subscribe to task updates for a user
   subscribeTaskUpdates(userId: string, callback: (tasks: TaskWithContext[]) => void): () => void {
     const subscriptionKey = `tasks-${userId}`;
-    
+
     // Clean up existing subscription if any
     const existingUnsubscribe = this.subscriptions.get(subscriptionKey);
     if (existingUnsubscribe) {
@@ -153,11 +164,13 @@ export class RealTimeSyncEngineImpl implements RealTimeSyncEngine {
     const unsubscribe = this.taskService.subscribeToUserTasks(userId, (tasks) => {
       try {
         // Sort tasks by creation date (newest first)
-        const sortedTasks = tasks.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+        const sortedTasks = tasks.sort((a, b) => this.safeGetTime(b.createdAt) - this.safeGetTime(a.createdAt));
         callback(sortedTasks);
-        
-        // Log update for debugging
-        console.log(`Task updates for user ${userId}: ${tasks.length} tasks`);
+
+        // Log update for debugging (throttled)
+        if (Math.random() < 0.1) { // Only log 10% of updates to reduce noise
+          console.log(`Task updates for user ${userId}: ${tasks.length} tasks`);
+        }
       } catch (error) {
         console.error('Error in task updates subscription:', error);
         callback([]);
@@ -177,7 +190,7 @@ export class RealTimeSyncEngineImpl implements RealTimeSyncEngine {
   // Subscribe to team updates for a user
   subscribeTeamUpdates(userId: string, callback: (teams: Team[]) => void): () => void {
     const subscriptionKey = `teams-${userId}`;
-    
+
     // Clean up existing subscription if any
     const existingUnsubscribe = this.subscriptions.get(subscriptionKey);
     if (existingUnsubscribe) {
@@ -188,9 +201,9 @@ export class RealTimeSyncEngineImpl implements RealTimeSyncEngine {
     const unsubscribe = this.databaseService.subscribeToUserTeams(userId, (teams) => {
       try {
         // Sort teams by creation date (newest first)
-        const sortedTeams = teams.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+        const sortedTeams = teams.sort((a, b) => this.safeGetTime(b.createdAt) - this.safeGetTime(a.createdAt));
         callback(sortedTeams);
-        
+
         // Log update for debugging
         console.log(`Team updates for user ${userId}: ${teams.length} teams`);
       } catch (error) {
@@ -212,7 +225,7 @@ export class RealTimeSyncEngineImpl implements RealTimeSyncEngine {
   // Subscribe to notification updates for a user
   subscribeNotifications(userId: string, callback: (notifications: Notification[]) => void): () => void {
     const subscriptionKey = `notifications-${userId}`;
-    
+
     // Clean up existing subscription if any
     const existingUnsubscribe = this.subscriptions.get(subscriptionKey);
     if (existingUnsubscribe) {
@@ -223,9 +236,9 @@ export class RealTimeSyncEngineImpl implements RealTimeSyncEngine {
     const unsubscribe = this.databaseService.subscribeToUserNotifications(userId, (notifications) => {
       try {
         // Sort notifications by creation date (newest first)
-        const sortedNotifications = notifications.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+        const sortedNotifications = notifications.sort((a, b) => this.safeGetTime(b.createdAt) - this.safeGetTime(a.createdAt));
         callback(sortedNotifications);
-        
+
         // Log update for debugging
         console.log(`Notification updates for user ${userId}: ${notifications.length} notifications`);
       } catch (error) {
@@ -264,10 +277,10 @@ export class RealTimeSyncEngineImpl implements RealTimeSyncEngine {
       ]);
 
       const snapshot: UserDataSnapshot = {
-        meetings: meetings.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()),
-        tasks: tasks.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()),
-        teams: teams.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()),
-        notifications: notifications.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()),
+        meetings: meetings.sort((a, b) => this.safeGetTime(b.createdAt) - this.safeGetTime(a.createdAt)),
+        tasks: tasks.sort((a, b) => this.safeGetTime(b.createdAt) - this.safeGetTime(a.createdAt)),
+        teams: teams.sort((a, b) => this.safeGetTime(b.createdAt) - this.safeGetTime(a.createdAt)),
+        notifications: notifications.sort((a, b) => this.safeGetTime(b.createdAt) - this.safeGetTime(a.createdAt)),
         lastUpdated: new Date()
       };
 
@@ -319,8 +332,8 @@ export class RealTimeSyncEngineImpl implements RealTimeSyncEngine {
 
     try {
       // Process updates in chronological order
-      const sortedUpdates = this.updateQueue.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
-      
+      const sortedUpdates = this.updateQueue.sort((a, b) => this.safeGetTime(a.timestamp) - this.safeGetTime(b.timestamp));
+
       for (const update of sortedUpdates) {
         try {
           await this.processUpdate(update);
@@ -348,7 +361,7 @@ export class RealTimeSyncEngineImpl implements RealTimeSyncEngine {
   // Queue an update for later processing (when offline)
   private queueUpdate(update: RealTimeUpdate): void {
     this.updateQueue.push(update);
-    
+
     // Limit queue size to prevent memory issues
     if (this.updateQueue.length > 1000) {
       this.updateQueue = this.updateQueue.slice(-500); // Keep only the latest 500 updates
@@ -358,7 +371,7 @@ export class RealTimeSyncEngineImpl implements RealTimeSyncEngine {
   // Clean up all subscriptions
   cleanup(): void {
     console.log(`Cleaning up ${this.subscriptions.size} real-time subscriptions`);
-    
+
     // Unsubscribe from all active subscriptions
     for (const [key, unsubscribe] of this.subscriptions) {
       try {
@@ -397,5 +410,4 @@ export function getRealTimeSyncEngine(
   return syncEngineInstance;
 }
 
-// Export the implementation class as well
-export { RealTimeSyncEngineImpl };
+// RealTimeSyncEngineImpl is already exported in the class declaration above

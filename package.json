@@ -9,6 +9,8 @@
     "start": "node scripts/inject-env.js && next start",
     "test": "vitest",
     "test:run": "vitest run",
+    "setup-db": "node scripts/setup-database.js",
+    "test-db": "node scripts/test-database.js",
     "postinstall": "echo 'Dependencies installed successfully'"
   },
   "dependencies": {
@@ -73,6 +75,7 @@
     "@testing-library/react": "^16.3.0",
     "@testing-library/user-event": "^14.6.1",
     "@types/node": "^22",
+    "@types/pg": "^8.15.4",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^4.7.0",

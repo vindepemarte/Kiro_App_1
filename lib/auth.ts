@@ -190,6 +190,16 @@ export class AuthService {
           return 'Authentication token mismatch. Please refresh and try again.';
         case 'auth/operation-not-allowed':
           return 'Authentication method not enabled. Please contact support.';
+        case 'auth/email-already-in-use':
+          return 'This email is already registered. Please sign in instead or use a different email.';
+        case 'auth/weak-password':
+          return 'Password is too weak. Please choose a stronger password.';
+        case 'auth/invalid-email':
+          return 'Please enter a valid email address.';
+        case 'auth/user-not-found':
+          return 'No account found with this email. Please check your email or sign up.';
+        case 'auth/wrong-password':
+          return 'Incorrect password. Please try again.';
         default:
           return error.message || 'Authentication failed. Please try again.';
       }

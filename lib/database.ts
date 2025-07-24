@@ -1869,16 +1869,56 @@ function getDatabaseService(): DatabaseService {
   return getFactoryDatabaseService();
 }
 
+// List of subscription methods that should return unsubscribe functions synchronously
+const SUBSCRIPTION_METHODS = [
+  'subscribeToUserMeetings',
+  'subscribeToTeamMeetings', 
+  'subscribeToTeam',
+  'subscribeToUserTeams',
+  'subscribeToUserProfile',
+  'subscribeToUserNotifications',
+  'subscribeToUserTasksFromCollection'
+];
+
+// Client-side database instance cache
+let clientDatabaseInstance: DatabaseService | null = null;
+let clientDatabasePromise: Promise<DatabaseService> | null = null;
+
+// Get or create client database instance
+async function getClientDatabaseInstance(): Promise<DatabaseService> {
+  if (clientDatabaseInstance) {
+    return clientDatabaseInstance;
+  }
+  
+  if (clientDatabasePromise) {
+    return clientDatabasePromise;
+  }
+  
+  clientDatabasePromise = (async () => {
+    const { getRuntimeDatabaseService } = await import('./database-factory');
+    const instance = await getRuntimeDatabaseService();
+    clientDatabaseInstance = instance;
+    return instance;
+  })();
+  
+  return clientDatabasePromise;
+}
+
 // Export the database service with proper method binding
 export const databaseService = new Proxy({} as DatabaseService, {
   get(target, prop) {
+    const methodName = String(prop);
+    
     // For server-side, use runtime detection with PostgreSQL priority
     if (typeof window === 'undefined') {
       // Return a promise-based proxy for server-side usage
       return async (...args: any[]) => {
         const { getRuntimeDatabaseService } = await import('./database-factory');
         const instance = await getRuntimeDatabaseService();
-        console.log(`[SERVER] Using database service: ${instance.constructor.name} for method: ${String(prop)}`);
+        // Reduced logging for production
+        if (process.env.NODE_ENV === 'development' && !methodName.includes('get')) {
+          console.log(`[SERVER] Using database service: ${instance.constructor.name} for method: ${methodName}`);
+        }
         const value = (instance as any)[prop];
         if (typeof value === 'function') {
           return value.apply(instance, args);
@@ -1886,19 +1926,52 @@ export const databaseService = new Proxy({} as DatabaseService, {
         return value;
       };
     } else {
-      // For client-side, we need to use API routes for database operations
-      // But for now, we'll use the synchronous version with more logging
-      console.log(`[CLIENT] Accessing database method: ${String(prop)}`);
-      const instance = getDatabaseServiceInstance();
-      console.log(`[CLIENT] Using database service: ${instance.constructor.name}`);
-      const value = (instance as any)[prop];
-      if (typeof value === 'function') {
-        return function(...args: any[]) {
-          console.log(`[CLIENT] Calling database method: ${String(prop)} with args:`, args);
-          return value.apply(instance, args);
+      // For client-side, handle subscription methods differently
+      if (SUBSCRIPTION_METHODS.includes(methodName)) {
+        // Subscription methods should return unsubscribe functions synchronously
+        return (...args: any[]) => {
+          // Reduced logging for subscriptions
+          if (process.env.NODE_ENV === 'development') {
+            console.log(`[CLIENT] Setting up subscription: ${methodName}`);
+          }
+          
+          let actualUnsubscribe: (() => void) | null = null;
+          let isUnsubscribed = false;
+          
+          // Set up the subscription asynchronously
+          getClientDatabaseInstance().then(instance => {
+            if (isUnsubscribed) return; // Already unsubscribed before setup completed
+            
+            // Subscription setup complete (reduced logging)
+            const value = (instance as any)[prop];
+            if (typeof value === 'function') {
+              actualUnsubscribe = value.apply(instance, args);
+            }
+          }).catch(error => {
+            console.error(`Error setting up subscription ${methodName}:`, error);
+          });
+          
+          // Return an unsubscribe function immediately
+          return () => {
+            isUnsubscribed = true;
+            if (actualUnsubscribe && typeof actualUnsubscribe === 'function') {
+              actualUnsubscribe();
+            }
+          };
+        };
+      } else {
+        // Regular methods remain async
+        return async (...args: any[]) => {
+          // Reduced logging for regular methods
+          const instance = await getClientDatabaseInstance();
+          // Database service ready
+          const value = (instance as any)[prop];
+          if (typeof value === 'function') {
+            return value.apply(instance, args);
+          }
+          return value;
         };
       }
-      return value;
     }
   }
 });
