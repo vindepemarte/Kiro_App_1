@@ -324,4 +324,18 @@
   select {
     font-size: 16px;
   }
+  
+  /* Ensure toasts appear above navigation on mobile */
+  [data-radix-toast-viewport] {
+    top: 5rem !important; /* Below mobile header */
+    z-index: 9999 !important;
+  }
+}
+
+/* Desktop toast positioning */
+@media (min-width: 769px) {
+  [data-radix-toast-viewport] {
+    top: 1rem !important; /* Standard desktop positioning */
+    z-index: 9999 !important;
+  }
 }
